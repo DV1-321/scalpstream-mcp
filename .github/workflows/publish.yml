@@ -1,0 +1,84 @@
+# Publish the container image and register the server with the official MCP
+# Registry, on every version tag.
+#
+# WHY OIDC RATHER THAN A TOKEN
+#   `mcp-publisher login github` is an interactive device flow, and
+#   `login dns`/`login http` need a long-lived signing key kept somewhere. GitHub
+#   Actions OIDC needs neither: the runner proves this repository's identity to
+#   the registry directly, so the io.github.DV1-321/* namespace is authenticated
+#   with no secret to store, leak, or rotate.
+#
+# The image is built with ko, which produces a multi-arch image from Go source
+# without a Docker daemon.
+
+name: publish
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push the image to ghcr.io
+      id-token: write # mint the OIDC token the registry verifies
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      # Tests gate the release. A tag that fails them must not become a version
+      # someone installs.
+      - name: Test
+        run: go test ./...
+
+      - name: Install ko
+        uses: ko-build/setup-ko@v0.9
+
+      - name: Build and push image
+        env:
+          KO_DOCKER_REPO: ghcr.io/dv1-321/scalpstream-mcp
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ko build ./cmd/scalpmcp \
+            --bare \
+            --platform=linux/amd64,linux/arm64 \
+            --tags="${GITHUB_REF_NAME},latest" \
+            --image-label "io.modelcontextprotocol.server.name=io.github.DV1-321/scalpstream-mcp"
+
+      # server.json pins an exact image tag, so it has to track the tag being
+      # released rather than whatever was committed.
+      - name: Sync server.json to this tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          python3 - "$VERSION" "$GITHUB_REF_NAME" <<'PY'
+          import json, sys
+          version, ref = sys.argv[1], sys.argv[2]
+          with open("server.json") as f:
+              s = json.load(f)
+          s["version"] = version
+          for p in s.get("packages", []):
+              if p.get("registryType") == "oci":
+                  p["identifier"] = f"ghcr.io/dv1-321/scalpstream-mcp:{ref}"
+          with open("server.json", "w") as f:
+              json.dump(s, f, indent=2)
+              f.write("\n")
+          print(json.dumps(s, indent=2))
+          PY
+
+      - name: Install mcp-publisher
+        run: |
+          curl -sSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" \
+            | tar xz mcp-publisher
+          chmod +x mcp-publisher
+
+      - name: Publish to the MCP Registry
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
