@@ -103,8 +103,8 @@ func TestToolsListShape(t *testing.T) {
 	got := drive(t, previewOnlyToolset(), `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
 	res := got[0]["result"].(map[string]any)
 	tools, _ := res["tools"].([]any)
-	if len(tools) < 7 {
-		t.Fatalf("expected at least 7 tools, got %d", len(tools))
+	if len(tools) < 8 {
+		t.Fatalf("expected at least 8 tools, got %d", len(tools))
 	}
 	seen := map[string]bool{}
 	for _, raw := range tools {
@@ -132,7 +132,7 @@ func TestToolsListShape(t *testing.T) {
 	}
 	for _, want := range []string{
 		"options_research", "municipal_income", "crypto_research", "crypto_yields",
-		"cheapest_fuel", "air_quality", "border_crossings", "payment_status",
+		"cheapest_fuel", "air_quality", "border_crossings", "product_recalls", "payment_status",
 	} {
 		if !seen[want] {
 			t.Errorf("tool %q is missing", want)

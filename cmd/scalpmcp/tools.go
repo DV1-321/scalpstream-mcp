@@ -41,10 +41,10 @@ func newToolset(c *client.Client, base endpoints) *toolset {
 	return ts
 }
 
-// endpoints are the four service origins, overridable so tests can point at a
-// local stub instead of the live, money-moving feeds.
+// endpoints are the service origins, overridable so tests can point at a local
+// stub instead of the live, money-moving feeds.
 type endpoints struct {
-	Feed, Fuel, Air, Border string
+	Feed, Fuel, Air, Border, Recall string
 }
 
 func defaultEndpoints() endpoints {
@@ -53,6 +53,7 @@ func defaultEndpoints() endpoints {
 		Fuel:   "https://fuelscout.scalpstream.com",
 		Air:    "https://airscout.scalpstream.com",
 		Border: "https://borderscout.scalpstream.com",
+		Recall: "https://recallscout.scalpstream.com",
 	}
 }
 
@@ -387,6 +388,58 @@ func buildTools(e endpoints) []tool {
 					q.Set("place", p)
 				}
 				return e.Border + "/crossings?" + q.Encode(), nil
+			},
+		},
+		{
+			Name:  "product_recalls",
+			Title: "Is this product or vehicle recalled",
+			Description: "Active US recalls for a product, brand, ingredient or vehicle, searching FDA food/drug/" +
+				"medical-device enforcement, NHTSA vehicle safety campaigns and CPSC consumer product recalls in one " +
+				"query. Severity is normalised across all three regulators onto CRITICAL/SERIOUS/MODERATE/LOW — they " +
+				"grade differently, and the basis for each rating is returned so it can be checked. Includes the " +
+				"recalling firm, hazard, remedy, and the lot numbers and UPCs needed to tell whether a specific unit " +
+				"is affected. Returns ACTIVE recalls by default: a product name can match hundreds of historical " +
+				"recalls and only a handful of open ones. If an agency cannot be reached the response says so and " +
+				"sets complete=false — an incomplete lookup is never an all-clear.",
+			Schema: obj(map[string]any{
+				"product":       strProp("Product, brand or ingredient, e.g. 'infant formula'. Matched as a phrase, so keep it short and specific."),
+				"make":          strProp("Vehicle make. Requires model and year together."),
+				"model":         strProp("Vehicle model."),
+				"year":          numProp("Vehicle model year."),
+				"include_ended": map[string]any{"type": "boolean", "description": "Also return terminated recalls as history. Off by default; they are rarely what was meant."},
+				"limit":         numProp("Max recalls per list. Default 10."),
+			}),
+			Preview: e.Recall + "/preview",
+			BuildURL: func(args map[string]any) (string, error) {
+				product := argStr(args, "product")
+				mk, md := argStr(args, "make"), argStr(args, "model")
+				yr, hasYear := argNum(args, "year")
+				anyVehicle := mk != "" || md != "" || hasYear
+
+				if product == "" && !anyVehicle {
+					return "", errors.New("give either product=<name>, or make/model/year for a vehicle")
+				}
+				// Validated here so a half-specified vehicle costs an error rather
+				// than a paid call that returns nothing for a car that IS recalled.
+				if anyVehicle && (mk == "" || md == "" || !hasYear) {
+					return "", fmt.Errorf("a vehicle lookup needs make, model AND year together (got make=%q model=%q year=%v)", mk, md, args["year"])
+				}
+				q := url.Values{}
+				if product != "" {
+					q.Set("product", product)
+				}
+				if anyVehicle {
+					q.Set("make", mk)
+					q.Set("model", md)
+					q.Set("year", strconv.Itoa(int(yr)))
+				}
+				if v, ok := args["include_ended"].(bool); ok && v {
+					q.Set("include_ended", "1")
+				}
+				if n, ok := argNum(args, "limit"); ok && n > 0 {
+					q.Set("limit", strconv.Itoa(int(n)))
+				}
+				return e.Recall + "/recalls?" + q.Encode(), nil
 			},
 		},
 		{
