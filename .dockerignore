@@ -1,0 +1,17 @@
+# Keep the build context to what actually compiles. Beyond build speed this is a
+# safety property: whatever is not sent cannot be baked into a layer by mistake.
+.git
+.github
+assets
+*.md
+LICENSE
+server.json
+Dockerfile
+.dockerignore
+
+# Never ship a local environment file into an image, even though none is tracked
+# here — the whole point is that this failure mode stays impossible.
+.env
+.env.*
+*.pem
+*.key
