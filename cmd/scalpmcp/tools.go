@@ -1,0 +1,401 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/url"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/DV1-321/scalpstream-mcp/client"
+)
+
+// A tool is one callable capability. buildURL turns the model's arguments into
+// the paid resource URL; preview is the free endpoint used when payment is not
+// possible, so a caller without a spending key still gets something real back.
+type tool struct {
+	Name        string
+	Title       string
+	Description string
+	Schema      map[string]any
+	Preview     string
+	BuildURL    func(args map[string]any) (string, error)
+}
+
+type toolset struct {
+	client *client.Client
+	tools  []tool
+	byName map[string]tool
+}
+
+func newToolset(c *client.Client, base endpoints) *toolset {
+	ts := &toolset{client: c, byName: map[string]tool{}}
+	ts.tools = buildTools(base)
+	for _, t := range ts.tools {
+		ts.byName[t.Name] = t
+	}
+	return ts
+}
+
+// endpoints are the four service origins, overridable so tests can point at a
+// local stub instead of the live, money-moving feeds.
+type endpoints struct {
+	Feed, Fuel, Air, Border string
+}
+
+func defaultEndpoints() endpoints {
+	return endpoints{
+		Feed:   "https://feed.scalpstream.com",
+		Fuel:   "https://fuelscout.scalpstream.com",
+		Air:    "https://airscout.scalpstream.com",
+		Border: "https://borderscout.scalpstream.com",
+	}
+}
+
+func (ts *toolset) list() []map[string]any {
+	out := make([]map[string]any, 0, len(ts.tools))
+	for _, t := range ts.tools {
+		out = append(out, map[string]any{
+			"name":        t.Name,
+			"title":       t.Title,
+			"description": t.Description,
+			"inputSchema": t.Schema,
+		})
+	}
+	return out
+}
+
+func (ts *toolset) instructions() string {
+	mode := "PREVIEW-ONLY: no spending key is configured, so paid tools return the free preview plus the exact price. Set EVM_BASE_PRIVATE_KEY to enable paid calls."
+	if ts.client.CanPay() {
+		spent, calls := ts.client.Spent()
+		mode = fmt.Sprintf("PAID MODE: calls settle USDC on Base at roughly $0.01 each. Spent so far: %s atomic units over %d calls.", spent, calls)
+	}
+	return "ScalpStream sells small, factual datasets per request over the x402 payment protocol " +
+		"(HTTP 402): US equity options research, federally tax-exempt municipal income, crypto " +
+		"candidates and staking yields, cheapest fuel, air quality, and US border-crossing wait " +
+		"times. Every tool returns JSON. " + mode
+}
+
+// call runs a tool by name. Argument errors are returned rather than panicking on
+// a bad type, because arguments come from a model and are not to be trusted.
+func (ts *toolset) call(name string, rawArgs json.RawMessage) (string, error) {
+	t, ok := ts.byName[name]
+	if !ok {
+		return "", fmt.Errorf("unknown tool %q; call tools/list for the available set", name)
+	}
+	args := map[string]any{}
+	if len(rawArgs) > 0 {
+		if err := json.Unmarshal(rawArgs, &args); err != nil {
+			return "", fmt.Errorf("arguments were not a JSON object: %v", err)
+		}
+	}
+	if t.BuildURL == nil { // local tool, no network
+		return ts.status(), nil
+	}
+	target, err := t.BuildURL(args)
+	if err != nil {
+		return "", err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 170*time.Second)
+	defer cancel()
+
+	body, err := ts.client.Fetch(ctx, target)
+	if err == nil {
+		return string(body), nil
+	}
+
+	// Payment refused or impossible: return the free preview and the exact price
+	// rather than only an error. The caller learns what the data looks like and
+	// what it would cost, which is the whole point of the free tier.
+	var pay *client.ErrPaymentRequired
+	if errors.As(err, &pay) && t.Preview != "" {
+		preview, perr := ts.client.Fetch(ctx, t.Preview)
+		note := map[string]any{
+			"paid":    false,
+			"reason":  pay.Reason,
+			"price":   pay.Quote,
+			"howto":   "Set EVM_BASE_PRIVATE_KEY to a Base-mainnet key holding a little USDC. Gas is sponsored by the facilitator, so no ETH is needed.",
+			"payload": "the free preview follows; the paid call returns the full dataset",
+		}
+		if perr == nil {
+			note["preview"] = json.RawMessage(preview)
+		} else {
+			note["preview_error"] = perr.Error()
+		}
+		out, merr := json.MarshalIndent(note, "", "  ")
+		if merr != nil {
+			return "", err
+		}
+		return string(out), nil
+	}
+	return "", err
+}
+
+func (ts *toolset) status() string {
+	spent, calls := ts.client.Spent()
+	st := map[string]any{
+		"paid_mode_enabled": ts.client.CanPay(),
+		"spent_atomic_usdc": spent,
+		"paid_calls":        calls,
+		"price_per_call":    "$0.01 USDC",
+		"rails":             []string{"USDC on Base (used by this client)", "USDC on Arbitrum", "USDC on Polygon", "XRP on XRPL", "RLUSD on XRPL"},
+		"custody":           "The seller holds no keys. This client signs with your own Base key, held only in memory for the process lifetime.",
+	}
+	if !ts.client.CanPay() {
+		st["how_to_enable"] = "Set EVM_BASE_PRIVATE_KEY to a throwaway Base-mainnet key holding a little USDC, then restart the MCP server."
+	}
+	out, _ := json.MarshalIndent(st, "", "  ")
+	return string(out)
+}
+
+// ---- argument helpers -------------------------------------------------------
+//
+// Arguments arrive from a model, so a number may be a float64, a string, or
+// missing entirely. These normalise without ever panicking.
+
+func argStr(args map[string]any, key string) string {
+	switch v := args[key].(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case bool:
+		return strconv.FormatBool(v)
+	default:
+		return ""
+	}
+}
+
+func argNum(args map[string]any, key string) (float64, bool) {
+	switch v := args[key].(type) {
+	case float64:
+		return v, true
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		return f, err == nil
+	default:
+		return 0, false
+	}
+}
+
+// requireLatLon is shared by the three geographic tools. Coordinates are
+// validated here rather than at the server, so a mistyped longitude costs an
+// error message instead of a paid call that returns nothing useful.
+func requireLatLon(args map[string]any) (string, string, error) {
+	lat, okLat := argNum(args, "lat")
+	lon, okLon := argNum(args, "lon")
+	if !okLat || !okLon {
+		return "", "", errors.New("lat and lon are required (decimal degrees)")
+	}
+	if lat < -90 || lat > 90 {
+		return "", "", fmt.Errorf("lat %g is out of range (-90..90)", lat)
+	}
+	if lon < -180 || lon > 180 {
+		return "", "", fmt.Errorf("lon %g is out of range (-180..180)", lon)
+	}
+	return strconv.FormatFloat(lat, 'f', -1, 64), strconv.FormatFloat(lon, 'f', -1, 64), nil
+}
+
+func numProp(desc string) map[string]any {
+	return map[string]any{"type": "number", "description": desc}
+}
+func strProp(desc string) map[string]any {
+	return map[string]any{"type": "string", "description": desc}
+}
+func enumProp(desc string, vals ...string) map[string]any {
+	return map[string]any{"type": "string", "description": desc, "enum": vals}
+}
+func obj(props map[string]any, required ...string) map[string]any {
+	sort.Strings(required)
+	m := map[string]any{"type": "object", "properties": props}
+	if len(required) > 0 {
+		m["required"] = required
+	} else {
+		m["required"] = []string{}
+	}
+	return m
+}
+
+func buildTools(e endpoints) []tool {
+	noArgs := obj(map[string]any{})
+
+	return []tool{
+		{
+			Name:  "options_research",
+			Title: "US equity options candidates",
+			Description: "Ranked short-term US equity options candidates with the observed metrics behind each ranking " +
+				"(signal strength, score, ATR%, relative volume, RSI, VWAP distance, ATM IV, daily trend, momentum) " +
+				"and an illustrative contract. Impersonal research data, identical for every buyer — not advice, and " +
+				"it carries no trade plan, position sizing, or buy/sell verdict.",
+			Schema:   noArgs,
+			Preview:  e.Feed + "/preview",
+			BuildURL: func(map[string]any) (string, error) { return e.Feed + "/picks", nil },
+		},
+		{
+			Name:  "municipal_income",
+			Title: "Federally tax-exempt municipal income",
+			Description: "Municipal bond funds and muni closed-end funds whose distributions are exempt from US federal " +
+				"income tax, ranked, with tax-equivalent yields computed for the 24%, 32% and 37% brackets, current " +
+				"yield, distribution frequency, growth streak and years without a cut. Impersonal research data, not advice.",
+			Schema:   noArgs,
+			Preview:  e.Feed + "/preview-dividends",
+			BuildURL: func(map[string]any) (string, error) { return e.Feed + "/dividends", nil },
+		},
+		{
+			Name:  "crypto_research",
+			Title: "Cryptocurrency candidates",
+			Description: "Ranked cryptocurrency candidates using the same technical signals as the equity feed (RSI, ATR, " +
+				"VWAP, momentum) plus a macro overlay from the Fear & Greed index and news sentiment. Impersonal " +
+				"research data, not advice.",
+			Schema:   noArgs,
+			Preview:  e.Feed + "/preview-crypto",
+			BuildURL: func(map[string]any) (string, error) { return e.Feed + "/crypto", nil },
+		},
+		{
+			Name:  "crypto_yields",
+			Title: "Crypto staking and interest yields",
+			Description: "Where to earn interest or staking rewards on crypto and stablecoins: DeFi staking APY, " +
+				"stablecoin lending and savings rates, and liquidity-pool yields across CeFi platforms and DeFi " +
+				"protocols, risk-adjusted by pool depth (TVL) and base-versus-emission share, with A/B/C ratings.",
+			Schema:   noArgs,
+			Preview:  e.Feed + "/preview-yields",
+			BuildURL: func(map[string]any) (string, error) { return e.Feed + "/yields", nil },
+		},
+		{
+			Name:  "cheapest_fuel",
+			Title: "Cheapest fuel near a location",
+			Description: "Cheapest fuel for a location and grade. Station-level pricing where governments publish open " +
+				"data (Spain, France, Italy); official regional averages for the US via EIA. With smart=true the " +
+				"ranking weighs the pump price against the fuel and time spent on the detour, so the cheapest sign " +
+				"is not always the cheapest tank.",
+			Schema: obj(map[string]any{
+				"country": enumProp("ISO-3166 alpha-2 country code. ES/FR/IT give station-level prices; US gives a regional average.", "ES", "FR", "IT", "US"),
+				"lat":     numProp("Latitude in decimal degrees. Required for station-level countries (ES/FR/IT)."),
+				"lon":     numProp("Longitude in decimal degrees. Required for station-level countries."),
+				"region":  strProp("US state code, e.g. CA. Used instead of lat/lon when country=US."),
+				"grade":   enumProp("Fuel grade.", "e5", "e10", "sp98", "diesel", "diesel_premium", "lpg"),
+				"smart":   map[string]any{"type": "boolean", "description": "Rank by all-in cost (pump price plus the fuel and time of the detour) rather than pump price alone."},
+			}, "country"),
+			Preview: e.Fuel + "/preview",
+			BuildURL: func(args map[string]any) (string, error) {
+				country := strings.ToUpper(argStr(args, "country"))
+				if country == "" {
+					return "", errors.New("country is required (ES, FR, IT for station-level prices; US for a regional average)")
+				}
+				q := url.Values{}
+				q.Set("country", country)
+				if g := argStr(args, "grade"); g != "" {
+					q.Set("grade", g)
+				}
+				if country == "US" {
+					region := argStr(args, "region")
+					if region == "" {
+						return "", errors.New("country=US needs a region (a US state code such as CA); the US has no free station-level feed")
+					}
+					q.Set("region", region)
+				} else {
+					lat, lon, err := requireLatLon(args)
+					if err != nil {
+						return "", fmt.Errorf("country=%s returns station-level prices, so %w", country, err)
+					}
+					q.Set("lat", lat)
+					q.Set("lon", lon)
+				}
+				if s, ok := args["smart"].(bool); ok && s {
+					q.Set("smart", "1")
+				}
+				return e.Fuel + "/fuel?" + q.Encode(), nil
+			},
+		},
+		{
+			Name:  "air_quality",
+			Title: "Air quality and the cleanest window to be outside",
+			Description: "Current US AQI and pollutant breakdown for any coordinates worldwide, an EPA-based verdict on " +
+				"whether it is safe to exercise outdoors, and the cleanest contiguous window in the forecast ahead " +
+				"for a session of a given length. Modelled data (Copernicus CAMS), not a sensor at the exact spot.",
+			Schema: obj(map[string]any{
+				"lat":      numProp("Latitude in decimal degrees."),
+				"lon":      numProp("Longitude in decimal degrees."),
+				"hours":    numProp("How far ahead to search for a clean window, in hours. Default 24, maximum 168."),
+				"duration": numProp("How long you want to be outside, in hours; the window returned is a contiguous block this long. Default 1, maximum 12."),
+				"place":    strProp("Optional label for the location, used in the summary text."),
+			}, "lat", "lon"),
+			Preview: e.Air + "/preview",
+			BuildURL: func(args map[string]any) (string, error) {
+				lat, lon, err := requireLatLon(args)
+				if err != nil {
+					return "", err
+				}
+				q := url.Values{}
+				q.Set("lat", lat)
+				q.Set("lon", lon)
+				if h, ok := argNum(args, "hours"); ok {
+					q.Set("hours", strconv.Itoa(int(h)))
+				}
+				if d, ok := argNum(args, "duration"); ok {
+					q.Set("duration", strconv.Itoa(int(d)))
+				}
+				if p := argStr(args, "place"); p != "" {
+					q.Set("place", p)
+				}
+				return e.Air + "/air?" + q.Encode(), nil
+			},
+		},
+		{
+			Name:  "border_crossings",
+			Title: "Fastest US border crossing by all-in time",
+			Description: "Ranks US ports of entry by ALL-IN time — the drive there plus the current CBP wait once there — " +
+				"for passenger, commercial or pedestrian traffic, honouring which lanes the traveller may actually use. " +
+				"The nearest crossing is frequently not the fastest. Live CBP data across all 85 US ports of entry.",
+			Schema: obj(map[string]any{
+				"lat":     numProp("Latitude of the starting point, decimal degrees."),
+				"lon":     numProp("Longitude of the starting point, decimal degrees."),
+				"vehicle": enumProp("Traffic type.", "passenger", "commercial", "pedestrian"),
+				"lanes":   strProp("Comma-separated lanes the traveller is eligible for, e.g. 'standard,SENTRI/NEXUS,Ready,FAST'. Defaults to standard only — trusted-traveller lanes are opt-in, since claiming one the traveller cannot use returns a wait they cannot have."),
+				"radius":  numProp("Limit the search to crossings within this many km. 0 or omitted means no limit."),
+				"limit":   numProp("How many crossings to return. Default 5."),
+				"place":   strProp("Optional label for the starting point, used in the summary text."),
+			}, "lat", "lon"),
+			Preview: e.Border + "/preview",
+			BuildURL: func(args map[string]any) (string, error) {
+				lat, lon, err := requireLatLon(args)
+				if err != nil {
+					return "", err
+				}
+				q := url.Values{}
+				q.Set("lat", lat)
+				q.Set("lon", lon)
+				if v := argStr(args, "vehicle"); v != "" {
+					q.Set("vehicle", v)
+				}
+				if l := argStr(args, "lanes"); l != "" {
+					q.Set("lanes", l)
+				}
+				if r, ok := argNum(args, "radius"); ok && r > 0 {
+					q.Set("radius", strconv.Itoa(int(r)))
+				}
+				if n, ok := argNum(args, "limit"); ok && n > 0 {
+					q.Set("limit", strconv.Itoa(int(n)))
+				}
+				if p := argStr(args, "place"); p != "" {
+					q.Set("place", p)
+				}
+				return e.Border + "/crossings?" + q.Encode(), nil
+			},
+		},
+		{
+			Name:  "payment_status",
+			Title: "Payment configuration and spend so far",
+			Description: "Reports whether paid calls are enabled, how much this session has spent, the price per call, " +
+				"and which payment rails the services accept. Makes no network request and costs nothing.",
+			Schema: noArgs,
+			// No BuildURL: handled locally.
+		},
+	}
+}

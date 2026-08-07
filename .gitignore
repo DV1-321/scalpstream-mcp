@@ -1,7 +1,11 @@
-# Compiled binaries
-scalpmcp
-scalpmcp.exe
-*.exe
+# Compiled binaries.
+#
+# ANCHORED WITH A LEADING SLASH ON PURPOSE. An unanchored "scalpmcp" matches at
+# every depth, so it also matched the cmd/scalpmcp DIRECTORY and silently kept
+# the entire server out of the first commit — the module published, resolved,
+# and then failed with "does not contain package". Keep these anchored.
+/scalpmcp
+/scalpmcp.exe
 *.test
 
 # Never commit a key. The server reads EVM_BASE_PRIVATE_KEY from the
