@@ -41,6 +41,12 @@ jobs:
       - name: Install ko
         uses: ko-build/setup-ko@v0.9
 
+      # ko authenticates to registries through the standard docker credential
+      # store, which is empty on a fresh runner. Without this the push fails with
+      # a bare 403 on a blob HEAD, which does not look like an auth error at all.
+      - name: Log in to ghcr.io
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | ko login ghcr.io --username "${{ github.actor }}" --password-stdin
+
       - name: Build and push image
         env:
           KO_DOCKER_REPO: ghcr.io/dv1-321/scalpstream-mcp
