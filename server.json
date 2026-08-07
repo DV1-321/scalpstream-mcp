@@ -3,7 +3,7 @@
   "name": "io.github.DV1-321/scalpstream-mcp",
   "title": "ScalpStream",
   "description": "Pay-per-call data over x402: air quality, border waits, fuel prices, market research.",
-  "version": "0.1.1",
+  "version": "0.1.3",
   "repository": {
     "url": "https://github.com/DV1-321/scalpstream-mcp",
     "source": "github"

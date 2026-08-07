@@ -45,7 +45,7 @@ import (
 )
 
 // buildVersion is reported in serverInfo and in MCP directory listings.
-const buildVersion = "1.0.0"
+const buildVersion = "1.1.0"
 
 func main() {
 	// STDOUT BELONGS TO THE PROTOCOL. The MCP stdio transport reads JSON-RPC
