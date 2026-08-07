@@ -1,0 +1,19 @@
+# Compiled binaries
+scalpmcp
+scalpmcp.exe
+*.exe
+*.test
+
+# Never commit a key. The server reads EVM_BASE_PRIVATE_KEY from the
+# environment and writes it nowhere; these patterns exist so a local scratch
+# file holding one cannot be committed by accident.
+.env
+.env.*
+*.key
+*.pem
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
