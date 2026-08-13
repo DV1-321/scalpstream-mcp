@@ -86,6 +86,17 @@ type Client struct {
 	// Attestation is sent as X-Compliance-Attestation; some feeds gate on it.
 	Attestation string
 
+	// PreferChainID picks which EVM rail to pay on when a resource offers
+	// several, by EIP-155 chain id (8453 Base, 42161 Arbitrum One, 137 Polygon).
+	// Zero keeps the default preference: Base, then whatever else is offered.
+	//
+	// A seller can advertise a rail it has never actually been paid on — the
+	// challenge is signed and the facilitator will simulate it happily — so
+	// "configured" and "proven" are different states, and telling them apart
+	// requires choosing the rail deliberately rather than taking the default.
+	// The wallet must hold the asset ON that chain; balances do not travel.
+	PreferChainID int64
+
 	mu    sync.Mutex
 	spent big.Int
 	calls int
@@ -151,7 +162,7 @@ func (c *Client) Fetch(ctx context.Context, url string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("x402client: %s: %w", url, err)
 	}
-	opt, chainID, ok := findEVMOption(ch)
+	opt, chainID, ok := findEVMOption(ch, c.PreferChainID)
 	if !ok {
 		return nil, &ErrPaymentRequired{Resource: url, Reason: "no EVM (eip155) option offered; this client can only pay USDC on an EVM rail"}
 	}
@@ -271,7 +282,11 @@ func decodeChallenge(header string, body []byte) (x402.StdChallenge, error) {
 // facilitator settles most cheaply and where the seller's catalog entry lives.
 // Order in accepts[] is only a hint, so the choice is made here rather than
 // trusting position.
-func findEVMOption(ch x402.StdChallenge) (x402.StdAccept, int64, bool) {
+// prefer is the caller's chosen EIP-155 chain id, or 0 for the default
+// Base-first preference. A non-zero prefer that the resource does not offer is
+// reported as no match rather than silently falling back — paying a different
+// chain than the one asked for would defeat the point of asking.
+func findEVMOption(ch x402.StdChallenge, prefer int64) (x402.StdAccept, int64, bool) {
 	var fallback x402.StdAccept
 	var fallbackChain int64
 	for _, a := range ch.Accepts {
@@ -282,12 +297,21 @@ func findEVMOption(ch x402.StdChallenge) (x402.StdAccept, int64, bool) {
 		if _, err := fmt.Sscanf(a.Network, "eip155:%d", &chainID); err != nil {
 			continue
 		}
+		if prefer != 0 {
+			if chainID == prefer {
+				return a, chainID, true
+			}
+			continue
+		}
 		if chainID == 8453 || chainID == 84532 {
 			return a, chainID, true
 		}
 		if fallbackChain == 0 {
 			fallback, fallbackChain = a, chainID
 		}
+	}
+	if prefer != 0 {
+		return x402.StdAccept{}, 0, false
 	}
 	if fallbackChain != 0 {
 		return fallback, fallbackChain, true
