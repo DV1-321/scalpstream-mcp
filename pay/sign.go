@@ -198,14 +198,36 @@ func addrWord(addr string) ([]byte, error) {
 	return w, nil
 }
 
+// uintWord encodes a decimal string as a 32-byte EIP-712 uint256 word.
+//
+// Both guards below close a silent failure in big.Int.FillBytes, which takes the
+// ABSOLUTE VALUE and panics when the value does not fit:
+//
+//   - a negative amount used to encode as its magnitude, so a quote of "-1"
+//     produced a signature authorising a transfer of 1
+//   - a value at or above 2^256 panicked with "buffer too small to fit value",
+//     crashing the caller rather than returning an error
+//
+// A uint256 has no negative range and no values above 2^256-1, so both are
+// malformed input. Rejecting them here means every caller is covered, not only
+// the ones that happen to bound the amount beforehand.
 func uintWord(dec string) ([]byte, error) {
 	n, ok := new(big.Int).SetString(dec, 10)
 	if !ok {
 		return nil, fmt.Errorf("not a decimal integer: %q", dec)
 	}
+	if n.Sign() < 0 {
+		return nil, fmt.Errorf("negative value %q cannot be a uint256", dec)
+	}
+	if n.BitLen() > 256 {
+		return nil, fmt.Errorf("value %q overflows uint256", dec)
+	}
 	return uintWordFromBig(n), nil
 }
 
+// uintWordFromBig encodes a non-negative big.Int that is known to fit. Callers
+// reaching this directly (the chain id, which is an int64) satisfy both by
+// construction; anything parsed from the wire goes through uintWord.
 func uintWordFromBig(n *big.Int) []byte {
 	w := make([]byte, 32)
 	n.FillBytes(w)

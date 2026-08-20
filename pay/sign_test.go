@@ -106,3 +106,45 @@ func mustAddrWord(t *testing.T, a string) []byte {
 	}
 	return w
 }
+
+// A uint256 has no negative range and no values above 2^256-1. Both used to
+// pass through big.Int.FillBytes silently or fatally: a negative amount encoded
+// as its magnitude (so "-1" authorised a transfer of 1) and an oversized one
+// panicked with "buffer too small to fit value".
+func TestUintWordRejectsOutOfRangeValues(t *testing.T) {
+	for _, bad := range []string{
+		"-1", // was silently encoded as +1
+		"-100000",
+		"115792089237316195423570985008687907853269984665640564039457584007913129639936", // 2^256, was a panic
+	} {
+		if _, err := uintWord(bad); err == nil {
+			t.Errorf("uintWord(%q) accepted an out-of-range value", bad)
+		}
+	}
+}
+
+// The boundary value must still encode: 2^256-1 is the largest legal uint256.
+func TestUintWordAcceptsTheBoundary(t *testing.T) {
+	max := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 256), big.NewInt(1))
+	w, err := uintWord(max.String())
+	if err != nil {
+		t.Fatalf("uintWord(2^256-1) = %v, want it accepted", err)
+	}
+	if len(w) != 32 {
+		t.Errorf("got a %d-byte word, want 32", len(w))
+	}
+}
+
+// A bad quote must be refused, not signed. AuthorizeTransfer is exported, so a
+// caller without its own price cap relies on this.
+func TestAuthorizeTransferRefusesANegativeAmount(t *testing.T) {
+	s, err := NewSigner("0x1111111111111111111111111111111111111111111111111111111111111111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := TokenDomain{Name: "USD Coin", Version: "2", ChainID: 8453,
+		Contract: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"}
+	if _, err := s.AuthorizeTransfer(d, "0x0000000000000000000000000000000000000001", "-1", time.Minute); err == nil {
+		t.Error("signed an authorization for a negative amount")
+	}
+}
