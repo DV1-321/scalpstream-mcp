@@ -21,7 +21,7 @@
 
 # Pinned by digest, not tag: a tag is mutable, so `golang:1.26-alpine` alone
 # means a rebuild months from now silently compiles against something else.
-FROM golang:1.26-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2 AS build
+FROM golang:1.26-alpine@sha256:28d89ee9cc0ff9fec75c82ca201e6bf7fdf9a679d4b7b24dfa04f2bb766bb468 AS build
 
 WORKDIR /src
 
@@ -43,7 +43,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 # distroless/static has no shell, no package manager and no writable filesystem
 # to speak of: there is nothing to exec even if the process were subverted. The
 # CA bundle it ships is not optional — every tool call is HTTPS.
-FROM gcr.io/distroless/static-debian12:nonroot@sha256:f5b485ea962d9bd1186b2f6b3a061191539b905b82ec395de78cbfae51f20e35
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:1b7b9f0f0e0a1d2155f531db587cc48ec26aaf97ab64364225f5bf18a054e66a
 
 COPY --from=build /out/scalpmcp /scalpmcp
 
