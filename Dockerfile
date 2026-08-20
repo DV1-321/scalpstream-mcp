@@ -36,8 +36,13 @@ COPY . .
 # to carry no libc at all. -trimpath keeps local build paths out of the binary,
 # -mod=readonly fails the build rather than quietly editing go.mod, and -s -w
 # drop the symbol and DWARF tables.
+# VERSION stamps main.buildVersion, which is what the server reports back on
+# `initialize`. Pass it from the release tag so the registry entry, the image
+# tag and the running server cannot report three different versions.
+ARG VERSION=0.1.3
 RUN CGO_ENABLED=0 GOOS=linux go build \
-        -trimpath -mod=readonly -ldflags='-s -w' \
+        -trimpath -mod=readonly \
+        -ldflags="-s -w -X main.buildVersion=${VERSION}" \
         -o /out/scalpmcp ./cmd/scalpmcp
 
 # distroless/static has no shell, no package manager and no writable filesystem

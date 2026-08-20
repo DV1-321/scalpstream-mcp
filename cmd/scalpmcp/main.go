@@ -40,12 +40,22 @@ import (
 	"os"
 	"strings"
 
-	"github.com/DV1-321/scalpstream-mcp/pay"
 	"github.com/DV1-321/scalpstream-mcp/client"
+	"github.com/DV1-321/scalpstream-mcp/pay"
 )
 
 // buildVersion is reported in serverInfo and in MCP directory listings.
-const buildVersion = "1.1.0"
+//
+// A var, not a const, so one release can stamp every surface from a single
+// source: `-ldflags "-X main.buildVersion=$VERSION"`. Three surfaces used to
+// carry the version independently — server.json's `version`, its OCI image tag,
+// and this literal — and they had drifted to 0.1.3, v0.1.1 and 1.1.0. A host
+// that lists the registry entry, pulls the image, then reads initialize got
+// three different answers, which reads as an unmaintained server.
+//
+// The fallback below is the version to publish when nothing was stamped; keep
+// it equal to server.json's `version`.
+var buildVersion = "0.1.3"
 
 func main() {
 	// STDOUT BELONGS TO THE PROTOCOL. The MCP stdio transport reads JSON-RPC
