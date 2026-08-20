@@ -98,8 +98,12 @@ type Client struct {
 	PreferChainID int64
 
 	mu    sync.Mutex
-	spent big.Int
+	spent big.Int // settled: the resource came back
+	held  big.Int // in flight, or paid without a confirmed delivery
 	calls int
+	// unconfirmed counts calls whose payment was presented but whose outcome is
+	// unknown — the seller answered non-200 after settlement had already run.
+	unconfirmed int
 }
 
 // Conservative defaults. Every ScalpStream endpoint costs $0.01, so a $0.10 cap
@@ -134,11 +138,25 @@ func (c *Client) budget() *big.Int {
 // CanPay reports whether this client is configured to spend.
 func (c *Client) CanPay() bool { return c.Signer != nil }
 
-// Spent returns total atomic units spent and the number of paid calls made.
+// Spent returns confirmed atomic units spent and the number of paid calls that
+// actually returned a resource.
 func (c *Client) Spent() (string, int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.spent.String(), c.calls
+}
+
+// Unconfirmed returns money that was committed but whose delivery was never
+// confirmed, and how many calls it covers.
+//
+// It is reported separately rather than folded into Spent because the two mean
+// different things to a caller reconciling a session: Spent is money that bought
+// something, Unconfirmed is money that may have moved for nothing. Both count
+// against the budget — a payment on the wire is a payment.
+func (c *Client) Unconfirmed() (string, int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.held.String(), c.unconfirmed
 }
 
 // Fetch GETs url, paying if the server demands it.
@@ -182,15 +200,22 @@ func (c *Client) Fetch(ctx context.Context, url string) ([]byte, error) {
 		return nil, &ErrPaymentRequired{Resource: url, Quote: quote,
 			Reason: fmt.Sprintf("quoted %s exceeds the per-call cap of %s atomic units", opt.Amount, c.maxPrice())}
 	}
-	c.mu.Lock()
-	projected := new(big.Int).Add(&c.spent, amount)
-	if projected.Cmp(c.budget()) > 0 {
-		spentSoFar := c.spent.String()
-		c.mu.Unlock()
-		return nil, &ErrPaymentRequired{Resource: url, Quote: quote,
-			Reason: fmt.Sprintf("session budget exhausted: spent %s of %s atomic units", spentSoFar, c.budget())}
+	// RESERVE the spend against the budget, rather than checking and releasing
+	// the lock. Check-then-add left a window in which two concurrent calls could
+	// both pass a budget neither should have passed — harmless while the MCP
+	// server dispatched serially, and an overspend the moment it does not.
+	if err := c.reserve(amount); err != nil {
+		return nil, &ErrPaymentRequired{Resource: url, Quote: quote, Reason: err.Error()}
 	}
-	c.mu.Unlock()
+	// From here on the reservation must be resolved on every path: settled if
+	// the resource arrives, released if we never presented a payment, or left
+	// held when the outcome is unknown.
+	settled := false
+	defer func() {
+		if !settled {
+			c.release(amount)
+		}
+	}()
 
 	name, _ := opt.Extra["name"].(string)
 	version, _ := opt.Extra["version"].(string)
@@ -212,20 +237,71 @@ func (c *Client) Fetch(ctx context.Context, url string) ([]byte, error) {
 	}
 	paid, err := c.do(ctx, url, base64.StdEncoding.EncodeToString(raw))
 	if err != nil {
+		// The payment was on the wire. Whether the seller settled it before the
+		// transport failed is unknowable here, so the reservation stays held
+		// rather than being released back into the budget.
+		c.markUnconfirmed()
+		settled = true
 		return nil, err
 	}
 	if paid.status != http.StatusOK {
 		// The money may or may not have moved; say so rather than implying it did
 		// not, because the caller may need to reconcile.
-		return nil, fmt.Errorf("x402client: %s: paid request returned HTTP %d (settlement state unknown): %s",
+		//
+		// This is NOT rare, and it is why the reservation is not released here.
+		// Settlement runs before the seller's handler does — a feed whose upstream
+		// data source is down answers 502 having already been paid — so releasing
+		// would let a retry loop through an outage spend real money against a
+		// budget counter that never moved.
+		c.markUnconfirmed()
+		settled = true
+		return nil, fmt.Errorf("x402client: %s: paid request returned HTTP %d (settlement state unknown, counted against the budget): %s",
 			url, paid.status, snippet(paid.body, 300))
 	}
-	// Count the spend only once the resource is actually in hand.
+	// Confirmed: move the reservation into settled spend.
+	c.commit(amount)
+	settled = true
+	return paid.body, nil
+}
+
+// reserve claims amount against the budget, counting money already committed to
+// in-flight or unconfirmed calls. It is the only place the budget is enforced.
+func (c *Client) reserve(amount *big.Int) error {
 	c.mu.Lock()
+	defer c.mu.Unlock()
+	committed := new(big.Int).Add(&c.spent, &c.held)
+	projected := committed.Add(committed, amount)
+	if projected.Cmp(c.budget()) > 0 {
+		return fmt.Errorf("session budget exhausted: %s of %s atomic units committed",
+			new(big.Int).Add(&c.spent, &c.held), c.budget())
+	}
+	c.held.Add(&c.held, amount)
+	return nil
+}
+
+// release returns a reservation to the budget. Called only when no payment was
+// presented, so nothing can have moved.
+func (c *Client) release(amount *big.Int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.held.Sub(&c.held, amount)
+}
+
+// commit turns a reservation into confirmed spend.
+func (c *Client) commit(amount *big.Int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.held.Sub(&c.held, amount)
 	c.spent.Add(&c.spent, amount)
 	c.calls++
-	c.mu.Unlock()
-	return paid.body, nil
+}
+
+// markUnconfirmed records that a presented payment had an unknown outcome. The
+// reservation stays held, so the budget keeps counting it.
+func (c *Client) markUnconfirmed() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.unconfirmed++
 }
 
 type rawResponse struct {

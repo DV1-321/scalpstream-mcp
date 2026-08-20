@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
-	"github.com/DV1-321/scalpstream-mcp/pay"
 	"github.com/DV1-321/scalpstream-mcp/client"
+	"github.com/DV1-321/scalpstream-mcp/pay"
 )
 
 // challengeServer answers 402 with a standard x402 v2 challenge quoting amount,
@@ -277,5 +279,88 @@ func TestQuoteReportsServerTerms(t *testing.T) {
 	}
 	if pay.Quote.PayTo != "0x1111111111111111111111111111111111111111" {
 		t.Errorf("payTo = %q", pay.Quote.PayTo)
+	}
+}
+
+// The budget must hold under concurrent calls.
+//
+// The check used to read `spent`, release the lock, and only add after the
+// resource came back — so two calls could both pass a budget neither should
+// have passed. That was harmless while the MCP server dispatched serially, and
+// an overspend the moment it stopped. Reserving under one lock is what closes it.
+//
+// (The race detector needs cgo, which this toolchain does not have; this test
+// exercises the invariant rather than the memory model.)
+func TestBudgetHoldsUnderConcurrentCalls(t *testing.T) {
+	const price = 10_000 // $0.01
+	var served int32
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("PAYMENT-SIGNATURE") != "" {
+			atomic.AddInt32(&served, 1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true}`))
+			return
+		}
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"x402Version":2,"accepts":[{"scheme":"exact","network":"eip155:8453",
+			"amount":"10000","asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","payTo":"0x0000000000000000000000000000000000000001",
+			"extra":{"name":"USD Coin","version":"2"}}]}`))
+	}))
+	defer srv.Close()
+
+	signer, err := pay.NewSigner("0x1111111111111111111111111111111111111111111111111111111111111111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Budget for exactly 3 calls; 20 goroutines race for them.
+	c := &client.Client{
+		Signer: signer,
+		Budget: big.NewInt(3 * price),
+		HTTP:   srv.Client(),
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, _ = c.Fetch(context.Background(), srv.URL+"/picks")
+		}()
+	}
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&served); got > 3 {
+		t.Errorf("seller was paid %d times against a 3-call budget", got)
+	}
+	spent, calls := c.Spent()
+	if calls > 3 {
+		t.Errorf("recorded %d paid calls against a 3-call budget", calls)
+	}
+	want := big.NewInt(int64(calls) * price)
+	if spent != want.String() {
+		t.Errorf("spent = %s, want %s for %d calls", spent, want, calls)
+	}
+}
+
+// A call the client REFUSED must not leave money reserved, or a budget bleeds
+// away on requests that never happened.
+func TestRefusedCallReleasesItsReservation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"x402Version":2,"accepts":[{"scheme":"exact","network":"eip155:8453",
+			"amount":"10000","asset":"0xUSDC","payTo":"0xrecv","extra":{"name":"USD Coin","version":"2"}}]}`))
+	}))
+	defer srv.Close()
+
+	// No signer: every call is refused before anything is signed.
+	c := &client.Client{HTTP: srv.Client()}
+	for i := 0; i < 50; i++ {
+		if _, err := c.Fetch(context.Background(), srv.URL+"/picks"); err == nil {
+			t.Fatal("a call with no signer should be refused")
+		}
+	}
+	if held, n := c.Unconfirmed(); held != "0" || n != 0 {
+		t.Errorf("refused calls left %s held over %d unconfirmed; want 0/0", held, n)
 	}
 }
