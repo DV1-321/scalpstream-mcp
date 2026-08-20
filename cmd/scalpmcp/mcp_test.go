@@ -2,11 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DV1-321/scalpstream-mcp/client"
 )
@@ -175,12 +179,89 @@ func TestPaymentStatusIsLocalAndHonest(t *testing.T) {
 		t.Fatalf("payment_status should not error: %v", res)
 	}
 	content := res["content"].([]any)[0].(map[string]any)
-	var st map[string]any
-	if err := json.Unmarshal([]byte(content["text"].(string)), &st); err != nil {
+	var env map[string]any
+	if err := json.Unmarshal([]byte(content["text"].(string)), &env); err != nil {
 		t.Fatalf("payment_status did not return JSON: %v", err)
 	}
+	// Every tool returns the same envelope. This one is local, so it costs
+	// nothing (paid=false) but IS the whole answer (complete=true).
+	if env["paid"] != false || env["complete"] != true {
+		t.Errorf("payment_status envelope = paid:%v complete:%v, want false/true", env["paid"], env["complete"])
+	}
+	st, _ := env["data"].(map[string]any)
 	if st["paid_mode_enabled"] != false {
 		t.Error("with no signer, paid_mode_enabled must report false")
+	}
+	// A declared outputSchema is only useful if the result actually carries the
+	// structured form a client validates against it.
+	sc, ok := res["structuredContent"].(map[string]any)
+	if !ok {
+		t.Fatal("result carries no structuredContent, but the tool declares an outputSchema")
+	}
+	if !reflect.DeepEqual(sc, env) {
+		t.Error("structuredContent and the text block disagree")
+	}
+}
+
+// Every tool declares how it behaves and what it returns. Without annotations a
+// host cannot tell a read-only lookup from a state-changing one and prompts for
+// each call; without an outputSchema a caller cannot know the result shape until
+// it has already paid.
+func TestToolsDeclareAnnotationsAndOutputSchema(t *testing.T) {
+	got := drive(t, previewOnlyToolset(), `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	tools := got[0]["result"].(map[string]any)["tools"].([]any)
+
+	for _, raw := range tools {
+		tl := raw.(map[string]any)
+		name := tl["name"].(string)
+
+		ann, ok := tl["annotations"].(map[string]any)
+		if !ok {
+			t.Errorf("%s has no annotations", name)
+			continue
+		}
+		// Nothing here mutates seller state, and saying so is what lets a host
+		// call these without confirming every time.
+		if ann["readOnlyHint"] != true {
+			t.Errorf("%s readOnlyHint = %v, want true", name, ann["readOnlyHint"])
+		}
+		if ann["destructiveHint"] != false {
+			t.Errorf("%s destructiveHint = %v, want false", name, ann["destructiveHint"])
+		}
+
+		out, ok := tl["outputSchema"].(map[string]any)
+		if !ok {
+			t.Errorf("%s declares no outputSchema", name)
+			continue
+		}
+		if out["type"] != "object" {
+			t.Errorf("%s outputSchema.type = %v, want object", name, out["type"])
+		}
+		props, _ := out["properties"].(map[string]any)
+		for _, field := range []string{"paid", "complete", "source", "data"} {
+			if props[field] == nil {
+				t.Errorf("%s outputSchema is missing %q", name, field)
+			}
+		}
+	}
+
+	// A paid tool must NOT claim idempotence: the data is stable for a given
+	// query, but each call settles its own payment, so a repeat is not free.
+	for _, raw := range tools {
+		tl := raw.(map[string]any)
+		ann := tl["annotations"].(map[string]any)
+		if tl["name"] == "payment_status" {
+			if ann["idempotentHint"] != true || ann["openWorldHint"] != false {
+				t.Error("payment_status is local and repeatable; it should say so")
+			}
+			continue
+		}
+		if ann["idempotentHint"] != false {
+			t.Errorf("%s claims idempotence, but repeating it spends money again", tl["name"])
+		}
+		if ann["openWorldHint"] != true {
+			t.Errorf("%s reaches an external service and should declare openWorldHint", tl["name"])
+		}
 	}
 }
 
@@ -197,7 +278,7 @@ func TestArgumentValidationRejectsBadCoordinates(t *testing.T) {
 		{"cheapest_fuel", `{"country":"ES"}`, "lat and lon are required"},
 	}
 	for _, c := range cases {
-		_, err := ts.call(c.name, json.RawMessage(c.args))
+		_, _, err := ts.call(context.Background(), c.name, json.RawMessage(c.args))
 		if err == nil {
 			t.Errorf("%s(%s) should have failed", c.name, c.args)
 			continue
@@ -250,7 +331,7 @@ func TestPreviewFallbackWhenNoKey(t *testing.T) {
 	defer srv.Close()
 
 	ts := newToolset(&client.Client{}, endpoints{Feed: srv.URL, Fuel: srv.URL, Air: srv.URL, Border: srv.URL})
-	out, err := ts.call("options_research", json.RawMessage(`{}`))
+	out, structured, err := ts.call(context.Background(), "options_research", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("preview fallback should not error: %v", err)
 	}
@@ -258,11 +339,21 @@ func TestPreviewFallbackWhenNoKey(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("fallback was not JSON: %v", err)
 	}
+	// The text block and the structured result are the same value rendered
+	// twice; a client reading either must see the same thing.
+	if !reflect.DeepEqual(got, structured) {
+		t.Error("structuredContent and the text block disagree")
+	}
 	if got["paid"] != false {
 		t.Error("fallback must state plainly that nothing was paid")
 	}
-	if got["preview"] == nil {
-		t.Error("fallback must include the free preview")
+	// complete=false is the field an agent branches on: what came back is the
+	// preview, not the dataset the tool describes.
+	if got["complete"] != false {
+		t.Error("a preview fallback must report complete=false")
+	}
+	if got["data"] == nil {
+		t.Error("fallback must include the free preview under data")
 	}
 	price, _ := got["price"].(map[string]any)
 	if price["amount_usd"] != "0.0100" {
@@ -270,5 +361,93 @@ func TestPreviewFallbackWhenNoKey(t *testing.T) {
 	}
 	if previewHits != 1 {
 		t.Errorf("expected exactly 1 preview fetch, got %d", previewHits)
+	}
+}
+
+// A slow tool call must not stall the rest of the session.
+//
+// Dispatch used to be serial inside the read loop, so a paid fetch — up to
+// callTimeout — blocked every other message including `ping`. A host that treats
+// an unanswered keepalive as a dead server would drop the connection mid-payment.
+func TestSlowCallDoesNotBlockPing(t *testing.T) {
+	release := make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer slow.Close()
+	defer close(release)
+
+	ts := newToolset(&client.Client{}, endpoints{Feed: slow.URL})
+	var out bytes.Buffer
+	s := newServer(ts, &out)
+
+	in, w := io.Pipe()
+	done := make(chan error, 1)
+	go func() { done <- s.serve(in) }()
+
+	// Start a call that will not return until we release it.
+	_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"options_research","arguments":{}}}` + "\n"))
+	// Ping behind it must be answered while that call is still in flight.
+	_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"method":"ping"}` + "\n"))
+
+	deadline := time.After(5 * time.Second)
+	for {
+		if strings.Contains(out.String(), `"id":2`) {
+			break // the ping was answered while the tool call was blocked
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("ping was not answered while a tool call was in flight; got: %s", out.String())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	release <- struct{}{}
+	_ = w.Close()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("serve: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("serve did not return after stdin closed")
+	}
+}
+
+// An oversized message is refused, and the session survives it. bufio.Scanner
+// reported ErrTooLong by STOPPING, which ended the session and contradicted the
+// rule that one bad message must not take down a good session.
+func TestOversizedMessageDoesNotKillTheSession(t *testing.T) {
+	ts := newToolset(&client.Client{}, defaultEndpoints())
+	var out bytes.Buffer
+	s := newServer(ts, &out)
+
+	in, w := io.Pipe()
+	done := make(chan error, 1)
+	go func() { done <- s.serve(in) }()
+
+	go func() {
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"ping","pad":"`))
+		blob := bytes.Repeat([]byte("x"), 1<<20)
+		for i := 0; i < 9; i++ { // ~9 MB, past maxLineBytes
+			_, _ = w.Write(blob)
+		}
+		_, _ = w.Write([]byte(`"}` + "\n"))
+		// The session must still be alive for this one.
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"method":"ping"}` + "\n"))
+		_ = w.Close()
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("serve returned an error after an oversized message: %v", err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("serve did not return")
+	}
+	if !strings.Contains(out.String(), `"id":2`) {
+		t.Errorf("the message after an oversized one was not handled; got: %s", out.String())
 	}
 }

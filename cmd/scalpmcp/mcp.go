@@ -2,7 +2,9 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"sync"
@@ -53,6 +55,16 @@ type rpcResponse struct {
 	Error   *rpcError       `json:"error,omitempty"`
 }
 
+// maxConcurrentCalls bounds how many tool calls run at once.
+//
+// Dispatch used to be serial, inside the read loop, which meant a paid fetch —
+// up to callTimeout — blocked every other message including `ping`. A host that
+// treats an unanswered keepalive as a dead server would drop the connection
+// mid-payment. A small pool fixes that without letting a model open unbounded
+// concurrent purchases: the buyer's budget is the real limit, and it is enforced
+// by reservation in client.Fetch, not by this number.
+const maxConcurrentCalls = 4
+
 // server dispatches MCP methods. It is transport-agnostic so the protocol can be
 // exercised in tests without spawning a process or touching stdio.
 type server struct {
@@ -61,24 +73,58 @@ type server struct {
 	mu          sync.Mutex
 	out         *bufio.Writer
 	initialized bool
+
+	// slots bounds in-flight tool calls; wg lets serve drain them before it
+	// returns, so a closed stdin does not abandon a payment mid-flight.
+	slots chan struct{}
+	wg    sync.WaitGroup
+
+	// inflight maps a request id to the cancel func for its tool call, so
+	// notifications/cancelled can actually stop work rather than being noted
+	// and ignored.
+	cancelMu sync.Mutex
+	inflight map[string]context.CancelFunc
 }
 
 func newServer(ts *toolset, w io.Writer) *server {
-	return &server{tools: ts, out: bufio.NewWriter(w)}
+	return &server{
+		tools:    ts,
+		out:      bufio.NewWriter(w),
+		slots:    make(chan struct{}, maxConcurrentCalls),
+		inflight: make(map[string]context.CancelFunc),
+	}
 }
+
+// maxLineBytes caps one JSON-RPC message. MCP messages are small; this is
+// generous headroom that still bounds what a single line can allocate.
+const maxLineBytes = 8 << 20
 
 // serve reads newline-delimited JSON-RPC from r until EOF.
 //
 // A malformed line is answered and the loop continues rather than exiting: one
 // bad message from a client must not take down a session that is otherwise fine.
+// That now holds for an OVERSIZED line too — bufio.Scanner reports ErrTooLong by
+// stopping, which ended the session and contradicted the rule above, so the
+// reader is a bufio.Reader and a long line is drained and refused instead.
+//
+// serve returns only once every dispatched call has finished, so a closed stdin
+// cannot abandon a payment already in flight.
 func (s *server) serve(r io.Reader) error {
-	sc := bufio.NewScanner(r)
-	// MCP messages are small, but a tool result echoed back in a future revision
-	// could be large; 8MB is generous and bounded.
-	sc.Buffer(make([]byte, 0, 64*1024), 8<<20)
+	defer s.wg.Wait()
 
-	for sc.Scan() {
-		line := sc.Bytes()
+	br := bufio.NewReaderSize(r, 64*1024)
+	for {
+		line, err := readLine(br, maxLineBytes)
+		if errors.Is(err, errLineTooLong) {
+			s.writeError(nil, codeInvalidRequest, "message exceeds the size limit", maxLineBytes)
+			continue
+		}
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
 		if len(trimSpace(line)) == 0 {
 			continue
 		}
@@ -89,7 +135,35 @@ func (s *server) serve(r io.Reader) error {
 		}
 		s.handle(&req)
 	}
-	return sc.Err()
+}
+
+// errLineTooLong marks a message past maxLineBytes. The line is consumed to the
+// newline before it is reported, so the next read starts at a message boundary
+// rather than in the middle of the oversized one.
+var errLineTooLong = errors.New("scalpmcp: message too long")
+
+func readLine(br *bufio.Reader, limit int) ([]byte, error) {
+	var buf []byte
+	for {
+		chunk, isPrefix, err := br.ReadLine()
+		if err != nil {
+			return nil, err
+		}
+		if len(buf)+len(chunk) <= limit {
+			buf = append(buf, chunk...)
+		} else {
+			buf = buf[:0] // over the limit: stop accumulating, keep draining
+			for isPrefix {
+				if _, isPrefix, err = br.ReadLine(); err != nil {
+					return nil, err
+				}
+			}
+			return nil, errLineTooLong
+		}
+		if !isPrefix {
+			return buf, nil
+		}
+	}
 }
 
 func (s *server) handle(req *rpcRequest) {
@@ -115,10 +189,18 @@ func (s *server) handle(req *rpcRequest) {
 		}
 	case "tools/call":
 		if !isNotification {
-			s.handleToolCall(req)
+			// Dispatched off the read loop so a slow paid fetch cannot stall
+			// ping, tools/list, or a cancellation aimed at itself.
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				s.slots <- struct{}{}
+				defer func() { <-s.slots }()
+				s.handleToolCall(req)
+			}()
 		}
 	case "notifications/cancelled":
-		// Nothing to cancel: every call here is synchronous and short.
+		s.handleCancelled(req)
 	default:
 		if !isNotification {
 			s.writeError(req.ID, codeMethodNotFound, "unknown method: "+req.Method, nil)
@@ -163,13 +245,51 @@ type toolCallParams struct {
 	Arguments json.RawMessage `json:"arguments,omitempty"`
 }
 
+// cancelledParams is the notifications/cancelled body: the request to stop.
+type cancelledParams struct {
+	RequestID json.RawMessage `json:"requestId"`
+	Reason    string          `json:"reason,omitempty"`
+}
+
+// handleCancelled stops the tool call for the named request, if it is still
+// running. A cancellation for an unknown or finished id is ignored, which is
+// the correct outcome and not an error worth reporting — the notification and
+// the result can always race.
+func (s *server) handleCancelled(req *rpcRequest) {
+	var p cancelledParams
+	if err := json.Unmarshal(req.Params, &p); err != nil || len(p.RequestID) == 0 {
+		return
+	}
+	s.cancelMu.Lock()
+	cancel, ok := s.inflight[string(p.RequestID)]
+	s.cancelMu.Unlock()
+	if ok {
+		cancel()
+	}
+}
+
 func (s *server) handleToolCall(req *rpcRequest) {
 	var p toolCallParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		s.writeError(req.ID, codeInvalidRequest, "invalid tools/call params", err.Error())
 		return
 	}
-	text, err := s.tools.call(p.Name, p.Arguments)
+
+	// Register the cancel func BEFORE the call starts, so a cancellation that
+	// arrives immediately still finds it.
+	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+	defer cancel()
+	key := string(req.ID)
+	s.cancelMu.Lock()
+	s.inflight[key] = cancel
+	s.cancelMu.Unlock()
+	defer func() {
+		s.cancelMu.Lock()
+		delete(s.inflight, key)
+		s.cancelMu.Unlock()
+	}()
+
+	text, structured, err := s.tools.call(ctx, p.Name, p.Arguments)
 	if err != nil {
 		// A tool that FAILED is not a protocol error. The spec puts execution
 		// failures in the result with isError so the model can see what went
@@ -181,8 +301,12 @@ func (s *server) handleToolCall(req *rpcRequest) {
 		})
 		return
 	}
+	// Both forms, always. structuredContent is what a client validates against
+	// the tool's outputSchema; the text block is the same value, and is what a
+	// client that predates structured results still reads.
 	s.writeResult(req.ID, map[string]any{
-		"content": []any{map[string]any{"type": "text", "text": text}},
+		"content":           []any{map[string]any{"type": "text", "text": text}},
+		"structuredContent": structured,
 	})
 }
 
