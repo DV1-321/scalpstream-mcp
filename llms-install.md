@@ -60,14 +60,28 @@ Use the absolute path from Step 1 if `scalpmcp` is not on `PATH`.
 
 Restart the MCP client and call the `payment_status` tool. It makes no network
 request and cannot cost anything, so it is the safe way to confirm the server is
-alive. Expect JSON containing:
+alive.
+
+Every tool returns the same envelope, so one shape covers success and refusal
+alike. `paid` says whether money moved; `complete` says whether `data` is the
+full dataset or the free preview:
 
 ```json
-{ "paid_mode_enabled": false, "price_per_call": "$0.01 USDC" }
+{
+  "paid": false,
+  "complete": true,
+  "source": "local",
+  "data": { "paid_mode_enabled": false, "price_per_call": "$0.01 USDC" }
+}
 ```
 
+`paid_mode_enabled` is the field to read: **false means no spending key is
+configured and nothing can be charged.** If it says true, a key is present —
+check `EVM_BASE_PRIVATE_KEY` in the environment before making any call.
+
 Then try `air_quality` with `{"lat": 47.6588, "lon": -117.4260}`. With no key it
-returns the free preview and the quoted price — that is success, not an error.
+comes back `"paid": false, "complete": false` with the free preview under `data`
+and the exact quote under `price` — that is success, not an error.
 
 ## Optional — enabling paid calls
 
