@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -379,8 +380,12 @@ func TestSlowCallDoesNotBlockPing(t *testing.T) {
 	defer close(release)
 
 	ts := newToolset(&client.Client{}, endpoints{Feed: slow.URL})
-	var out bytes.Buffer
-	s := newServer(ts, &out)
+	// syncBuffer, not bytes.Buffer: this test READS the output while the server
+	// is still writing to it, and bytes.Buffer is not safe for that. The server
+	// guards its own writes correctly; the race was on the test's side of the
+	// same buffer, and `go test -race` is the only thing that says so.
+	out := &syncBuffer{}
+	s := newServer(ts, out)
 
 	in, w := io.Pipe()
 	done := make(chan error, 1)
@@ -420,8 +425,8 @@ func TestSlowCallDoesNotBlockPing(t *testing.T) {
 // rule that one bad message must not take down a good session.
 func TestOversizedMessageDoesNotKillTheSession(t *testing.T) {
 	ts := newToolset(&client.Client{}, defaultEndpoints())
-	var out bytes.Buffer
-	s := newServer(ts, &out)
+	out := &syncBuffer{} // safe here too: reads happen after serve returns, but do not rely on that
+	s := newServer(ts, out)
 
 	in, w := io.Pipe()
 	done := make(chan error, 1)
@@ -450,4 +455,27 @@ func TestOversizedMessageDoesNotKillTheSession(t *testing.T) {
 	if !strings.Contains(out.String(), `"id":2`) {
 		t.Errorf("the message after an oversized one was not handled; got: %s", out.String())
 	}
+}
+
+// syncBuffer is a bytes.Buffer safe to read while the server writes to it.
+//
+// Needed only by tests that inspect output WHILE serve is still running. The
+// server serialises its own writes under its mutex, but a test reading the same
+// bytes.Buffer from another goroutine is a data race on the buffer's internals —
+// which `go test -race` catches and a plain `go test` does not.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
