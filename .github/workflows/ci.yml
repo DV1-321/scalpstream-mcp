@@ -1,0 +1,46 @@
+name: ci
+
+# This repository had no CI on push. Its only workflow, publish.yml, is gated on
+# `tags: ["v*"]`, so the test suite ran when a release was cut and at no other
+# time. The commit that added `-race` to this fleet edited publish.yml here
+# rather than adding a ci.yml as it did in the other seven repos, which left the
+# gap looking closed.
+#
+# What that cost, concretely: on 2026-08-31 eight commits merged to main with no
+# automated test run at all — including two that change concurrent code
+# ("fix a data race in the concurrency test itself", "dispatch tool calls off the
+# read loop, and honour cancellation"). Those are exactly the changes -race
+# exists to check, and the release gate would not have checked them until the
+# next tag, i.e. while shipping.
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # go-version-file rather than a pinned string: a hardcoded version drifts
+      # from go.mod silently, which is already true elsewhere in this fleet.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - run: go build ./...
+      - run: go vet ./...
+
+      # -race is the whole point of running this on a runner. It needs cgo, and
+      # the dev machine has CGO_ENABLED=0 and no gcc — where `go test -race`
+      # does not fail loudly, it just refuses to run, so a green local run says
+      # nothing about data races. This is the only place they can be detected.
+      #
+      # The suite is hermetic: verified by running it with HTTP_PROXY and
+      # HTTPS_PROXY pointed at a dead port, which passed. So a red run here means
+      # a real defect, not a flaky network.
+      - run: go test -race ./...
