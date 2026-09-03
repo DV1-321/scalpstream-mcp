@@ -61,6 +61,23 @@ func NewSigner(privHex string) (*Signer, error) {
 		return nil, fmt.Errorf("pay: private key must be 32 bytes, got %d", len(b))
 	}
 	priv := secp256k1.PrivKeyFromBytes(b)
+	/* Wipe the decoded copy once the key object owns it.
+	 *
+	 * PrivKeyFromBytes copies, so this slice is a second, redundant copy of the
+	 * key sitting in the heap until the GC happens to reuse the page — long
+	 * enough to reach a core dump, a swap file or a heap profile. Clearing it is
+	 * cheap and removes one copy.
+	 *
+	 * BE HONEST ABOUT THE LIMIT: it does not make the key un-recoverable from
+	 * this process. `privHex` is a Go string and therefore immutable, so the
+	 * ORIGINAL hex text cannot be wiped by anything here — a caller that wants
+	 * the strongest guarantee should keep the key in a []byte it controls, or
+	 * out of the process entirely in a wallet or HSM, which is what the doc
+	 * comment above already recommends.
+	 */
+	for i := range b {
+		b[i] = 0
+	}
 	return &Signer{priv: priv, addr: addressOf(priv.PubKey())}, nil
 }
 
