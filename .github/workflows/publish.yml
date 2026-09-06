@@ -46,20 +46,16 @@ jobs:
       - name: Log in to ghcr.io
         run: echo "${{ secrets.GITHUB_TOKEN }}" | ko login ghcr.io --username "${{ github.actor }}" --password-stdin
 
-      - name: Build and push image
-        env:
-          KO_DOCKER_REPO: ghcr.io/dv1-321/scalpstream-mcp
-        run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          ko build ./cmd/scalpmcp \
-            --bare \
-            --platform=linux/amd64,linux/arm64 \
-            --tags="${GITHUB_REF_NAME},latest" \
-            --image-label "io.modelcontextprotocol.server.name=io.github.DV1-321/scalpstream-mcp"
-
-      # server.json pins an exact image tag, so it has to track the tag being
-      # released rather than whatever was committed.
-      - name: Sync server.json to this tag
+      # The tag is the single source of truth, and everything else must ALREADY
+      # agree with it. This used to rewrite server.json here instead, which meant
+      # the committed file was permanently one release behind and nobody found
+      # out — v0.1.4 published while the repo still said 0.1.3.
+      #
+      # A check that fails the release is better than a fixup that hides the
+      # drift: the version a user sees comes from three places (this tag, the
+      # registry entry, and the binary's own serverInfo) and they are only
+      # trustworthy if they cannot silently disagree.
+      - name: Version must match the tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           python3 - "$VERSION" "$GITHUB_REF_NAME" <<'PY'
@@ -67,15 +63,37 @@ jobs:
           version, ref = sys.argv[1], sys.argv[2]
           with open("server.json") as f:
               s = json.load(f)
-          s["version"] = version
+          bad = []
+          if s["version"] != version:
+              bad.append(f'server.json version is {s["version"]!r}, tag says {version!r}')
+          want = f"ghcr.io/dv1-321/scalpstream-mcp:{ref}"
           for p in s.get("packages", []):
-              if p.get("registryType") == "oci":
-                  p["identifier"] = f"ghcr.io/dv1-321/scalpstream-mcp:{ref}"
-          with open("server.json", "w") as f:
-              json.dump(s, f, indent=2)
-              f.write("\n")
-          print(json.dumps(s, indent=2))
+              if p.get("registryType") == "oci" and p.get("identifier") != want:
+                  bad.append(f'server.json oci identifier is {p.get("identifier")!r}, want {want!r}')
+          if bad:
+              print("Release blocked — bump these to match the tag before tagging:")
+              for b in bad:
+                  print("  - " + b)
+              sys.exit(1)
+          print(f"server.json agrees with {ref}")
           PY
+
+      - name: Build and push image
+        env:
+          KO_DOCKER_REPO: ghcr.io/dv1-321/scalpstream-mcp
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          # Stamp the version INTO the binary, so `initialize` reports the same
+          # number the image tag and the registry entry carry. ko builds through
+          # `go build` and honours GOFLAGS; the previous step computed VERSION
+          # and then never passed it, so every published image reported the
+          # hardcoded fallback instead — v0.1.4's image said 0.1.3.
+          export GOFLAGS="-ldflags=-X=main.buildVersion=${VERSION}"
+          ko build ./cmd/scalpmcp \
+            --bare \
+            --platform=linux/amd64,linux/arm64 \
+            --tags="${GITHUB_REF_NAME},latest" \
+            --image-label "io.modelcontextprotocol.server.name=io.github.DV1-321/scalpstream-mcp"
 
       - name: Install mcp-publisher
         run: |

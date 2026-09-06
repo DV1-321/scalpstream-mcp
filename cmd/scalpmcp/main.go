@@ -53,9 +53,14 @@ import (
 // that lists the registry entry, pulls the image, then reads initialize got
 // three different answers, which reads as an unmaintained server.
 //
-// The fallback below is the version to publish when nothing was stamped; keep
-// it equal to server.json's `version`.
-var buildVersion = "0.1.3"
+// The fallback below is the version to publish when nothing was stamped; it
+// must equal server.json's `version`, and TestBuildVersionMatchesServerJSON
+// fails the build if it drifts. "Keep them equal" was only a comment before,
+// and they did not stay equal: v0.1.4 shipped an image reporting 0.1.3, because
+// the release workflow computed the version and then never passed it to the
+// linker. The workflow now stamps it and refuses to publish a tag that
+// disagrees with this file.
+var buildVersion = "0.1.5"
 
 func main() {
 	// STDOUT BELONGS TO THE PROTOCOL. The MCP stdio transport reads JSON-RPC
