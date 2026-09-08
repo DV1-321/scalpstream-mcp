@@ -3,9 +3,14 @@
 # WHY THIS FILE EXISTS WHEN CI DOES NOT USE IT
 #   Releases are built with ko, which is daemonless and needs no Dockerfile, and
 #   publish to ghcr.io/dv1-321/scalpstream-mcp. Registries that build from source
-#   rather than pull a published image do need one. This produces the same
+#   rather than pull a published image do need one. This produces an equivalent
 #   artefact by the ordinary route: same static binary, same entrypoint, same
-#   nonroot runtime. If you change one, change the other.
+#   nonroot uid — on a different (also shell-less, also static) base.
+#
+#   Because CI never builds this file, nothing here is covered by the release
+#   gate that checks server.json against the tag. Anything version-shaped in a
+#   Dockerfile is therefore load-bearing and unwatched, which is why the build
+#   below stamps no version of its own. Keep it that way.
 #
 # NO SECRETS, EVER
 #   There is deliberately no ARG or ENV for EVM_BASE_PRIVATE_KEY. A build
@@ -21,7 +26,7 @@
 
 # Pinned by digest, not tag: a tag is mutable, so `golang:1.26-alpine` alone
 # means a rebuild months from now silently compiles against something else.
-FROM golang:1.26-alpine@sha256:28d89ee9cc0ff9fec75c82ca201e6bf7fdf9a679d4b7b24dfa04f2bb766bb468 AS build
+FROM golang:1.26-alpine@sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628 AS build
 
 WORKDIR /src
 
@@ -39,16 +44,33 @@ COPY . .
 # VERSION stamps main.buildVersion, which is what the server reports back on
 # `initialize`. Pass it from the release tag so the registry entry, the image
 # tag and the running server cannot report three different versions.
-ARG VERSION=0.1.3
+#
+# The default is deliberately EMPTY, and `${VERSION:+...}` drops the -X flag
+# entirely when it is unset, so an unstamped build keeps the fallback compiled
+# into cmd/scalpmcp/main.go. A literal default here was a fourth place holding a
+# version number, and it drifted exactly the way the other three did: it still
+# read 0.1.3 at the 0.1.5 release, so `docker build .` produced a server that
+# announced a version two releases old. Nothing caught it, because CI publishes
+# with ko and never builds this file — this is the path source-building
+# registries take, so the wrong number reached third parties and not us.
+# TestDockerfileDoesNotPinItsOwnVersion keeps a literal from creeping back.
+ARG VERSION=
 RUN CGO_ENABLED=0 GOOS=linux go build \
         -trimpath -mod=readonly \
-        -ldflags="-s -w -X main.buildVersion=${VERSION}" \
+        -ldflags="-s -w ${VERSION:+-X main.buildVersion=$VERSION}" \
         -o /out/scalpmcp ./cmd/scalpmcp
 
 # distroless/static has no shell, no package manager and no writable filesystem
 # to speak of: there is nothing to exec even if the process were subverted. The
 # CA bundle it ships is not optional — every tool call is HTTPS.
-FROM gcr.io/distroless/static-debian12:nonroot@sha256:1b7b9f0f0e0a1d2155f531db587cc48ec26aaf97ab64364225f5bf18a054e66a
+#
+# NOT the same base the published image uses: ko has no Dockerfile to read, so
+# it builds on its own default, cgr.dev/chainguard/static. Both are shell-less
+# static bases running as uid 65532, so the two artefacts behave identically —
+# but they are different images, and a digest changing here says nothing about
+# ghcr.io/dv1-321/scalpstream-mcp. Check that one with `crane config`, not by
+# reading this line.
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 
 COPY --from=build /out/scalpmcp /scalpmcp
 

@@ -60,7 +60,7 @@ import (
 // the release workflow computed the version and then never passed it to the
 // linker. The workflow now stamps it and refuses to publish a tag that
 // disagrees with this file.
-var buildVersion = "0.1.5"
+var buildVersion = "0.1.6"
 
 func main() {
 	// STDOUT BELONGS TO THE PROTOCOL. The MCP stdio transport reads JSON-RPC

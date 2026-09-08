@@ -79,3 +79,50 @@ func TestServerJSONPinsTheMatchingImageTag(t *testing.T) {
 		t.Error("server.json declares no oci package")
 	}
 }
+
+// The Dockerfile was a fourth place carrying a version number, and it drifted
+// the same way the other three did — it still read `ARG VERSION=0.1.3` when the
+// repo was at 0.1.5, so `docker build .` with no --build-arg stamped 0.1.3 over
+// the correct fallback and produced a server announcing a version two releases
+// old.
+//
+// This one was worse than the drifts TestBuildVersionMatchesServerJSON covers,
+// for two reasons. CI publishes with ko and never reads the Dockerfile, so the
+// release gate that compares server.json to the tag could not see it. And the
+// Dockerfile exists specifically for registries that build from source rather
+// than pull the published image — so the only people who got the wrong number
+// were third parties, and never us.
+//
+// The fix is to remove the number rather than sync it: with an empty default,
+// `${VERSION:+...}` drops the -X flag and the build inherits buildVersion,
+// which the test above already ties to server.json. One source of truth cannot
+// disagree with itself. This test fails if a literal creeps back.
+func TestDockerfileDoesNotPinItsOwnVersion(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "Dockerfile"))
+	if err != nil {
+		t.Fatalf("cannot read Dockerfile: %v", err)
+	}
+	var sawARG bool
+	for _, line := range strings.Split(string(b), "\n") {
+		f := strings.TrimSpace(line)
+		if !strings.HasPrefix(f, "ARG VERSION") {
+			continue
+		}
+		sawARG = true
+		if def := strings.TrimSpace(strings.TrimPrefix(f, "ARG VERSION")); def != "" && def != "=" {
+			t.Errorf("Dockerfile has %q — a version literal CI never checks.\n"+
+				"Leave the default empty; ${VERSION:+...} then falls back to "+
+				"buildVersion, which server.json already governs.", f)
+		}
+	}
+	if !sawARG {
+		t.Error("Dockerfile declares no ARG VERSION — a tagged image build can no " +
+			"longer stamp the version it was built for")
+	}
+	// The flag must be conditional. `-X main.buildVersion=${VERSION}` with an
+	// empty VERSION stamps an EMPTY version, which reports worse than a stale one.
+	if !strings.Contains(string(b), "${VERSION:+") {
+		t.Error("the -X ldflag is not guarded by ${VERSION:+...}: an unstamped " +
+			"build would set buildVersion to the empty string")
+	}
+}
