@@ -152,7 +152,7 @@ func readLine(br *bufio.Reader, limit int) ([]byte, error) {
 		if len(buf)+len(chunk) <= limit {
 			buf = append(buf, chunk...)
 		} else {
-			buf = buf[:0] // over the limit: stop accumulating, keep draining
+			// Over the limit: stop accumulating, keep draining so the reader stays in sync.
 			for isPrefix {
 				if _, isPrefix, err = br.ReadLine(); err != nil {
 					return nil, err
