@@ -23,11 +23,11 @@ jobs:
   test:
     runs-on: [self-hosted, linux]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # go-version-file rather than a pinned string: a hardcoded version drifts
       # from go.mod silently, which is already true elsewhere in this fleet.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
