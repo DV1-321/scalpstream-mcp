@@ -19,9 +19,32 @@ git rm -f PR_awesome-mcp-servers.md
 git commit
 ```
 
-In the commit editor, delete the bullet about this file, and change "since
-v0.1.6" to "since v0.1.3" (product_recalls shipped in v0.1.3). Do not push the
-branch itself. This file stays on it and in the `wt_mcp_1009` worktree.
+In the commit editor, delete the whole prefilled message and paste the one
+below. The prefilled text joins all the branch commit messages. They mention
+this file, the review and gate passes, and "since v0.1.6", which is wrong:
+product_recalls shipped in v0.1.3. Do not push the branch itself. This file
+stays on it and in the `wt_mcp_1009` worktree.
+
+```text
+Listing cleanup: README lists all 9 tools, glama.json, recalls everywhere
+
+product_recalls has been registered since v0.1.3, but the README tool table
+still listed 8 tools. Directories copy the README.
+
+- README: add the product_recalls row, and say up front that this is a
+  client that buys pay-per-call data feeds: it places no orders and connects
+  to no brokerage. With no key it returns free previews; with your own Base
+  key it pays per call under a per-call cap and a total budget.
+- glama.json at the root (maintainers DV1-321), so Glama can sync ownership.
+- server.json description names recalls (98 characters; the registry allows
+  100). The version stays 0.1.6, so the registry sees it at the next release.
+- llms-install.md and the initialize instructions string name recalls too.
+- listing_test.go: the README tool table must match the registered tools in
+  both directions, and server.json's description and title must fit the
+  registry's 100-character limit.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+```
 
 ## 1. punkpeye/awesome-mcp-servers
 
@@ -189,8 +212,15 @@ market research, crypto yields, fuel, air quality, border waits, recalls."
 
 - The registry still shows v0.1.6 with the old description. This branch changes
   `server.json`'s description to name recalls and say the server buys feeds.
-  That reaches the registry only with the next release: a version bump in
-  `server.json` and `buildVersion`, then a `v*` tag push, which runs
-  publish.yml.
+  That reaches the registry only with the next release, and it must be a new
+  version: the registry does not take 0.1.6 a second time.
 - The version was not bumped here and no tag was pushed. A release is your
-  decision.
+  decision. Glama and LobeHub read the README from GitHub, so pushing `main` is
+  enough for them. A release only changes the registry entry and the image.
+- To release (for example 0.1.7), in one commit on `main`, change all three:
+  `server.json` `version` to `0.1.7`, its OCI `identifier` to
+  `ghcr.io/dv1-321/scalpstream-mcp:v0.1.7`, and `buildVersion` in
+  `cmd/scalpmcp/main.go` to `"0.1.7"`. Run `go test ./...`. The version tests
+  fail if any of the three disagree. Push `main`, then
+  `git tag v0.1.7` and `git push origin v0.1.7`. The tag runs publish.yml, which
+  refuses a tag that does not match `server.json`.
