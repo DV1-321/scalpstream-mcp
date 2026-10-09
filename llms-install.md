@@ -6,9 +6,10 @@ this server up on a user's machine. Follow it top to bottom.
 ## What you are installing
 
 An MCP server that buys small factual datasets at call time over the x402
-payment protocol — air quality, US border-crossing waits, fuel prices, and market
-research — for about $0.01 a call. There is no account to create and no API key
-to obtain.
+payment protocol — air quality, US border-crossing waits, fuel prices, US product
+recalls, and market research — for about $0.01 a call. It is a data-buying
+client, not a trading tool: it places no orders. There is no account to create
+and no API key to obtain.
 
 **Install it without a wallet first.** The server is fully functional in
 preview-only mode: every paid tool returns the service's free preview plus the

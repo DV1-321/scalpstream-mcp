@@ -1,7 +1,11 @@
 # ScalpStream MCP server
 
-An MCP server that buys small, factual datasets at call time with your own
-wallet, over [x402](https://x402.org) — roughly **$0.01 a call**, no account, no
+**A client that buys pay-per-call data feeds — not a trading tool.** It places
+no orders and connects to no brokerage. With no key it returns free previews;
+with your own Base key it pays per call, under a per-call cap and a total budget.
+
+It buys small, factual datasets at call time with your own wallet, over
+[x402](https://x402.org) — roughly **$0.01 a call**, no account, no
 subscription, no API key anywhere in the flow.
 
 Most MCP servers wrap an API you already hold a key for. This one pays as it
@@ -24,6 +28,7 @@ you would be buying before deciding to buy it.
 | `cheapest_fuel` | Cheapest fuel by location and grade. Station-level for Spain, France, Italy; official regional averages for the US. |
 | `air_quality` | Current AQI and pollutants anywhere in the world, an EPA-based verdict on exercising outdoors, and the cleanest window ahead. |
 | `border_crossings` | US ports of entry ranked by **all-in** time — drive plus current CBP wait — per lane type. The nearest crossing is often not the fastest. |
+| `product_recalls` | Active US recalls for a product, brand, ingredient or vehicle across FDA, NHTSA and CPSC, with severity on one scale, the hazard, the remedy, and the lot numbers and UPCs to check a specific unit. |
 | `payment_status` | What's configured, what's been spent. Makes no network call and costs nothing. |
 
 ## Install

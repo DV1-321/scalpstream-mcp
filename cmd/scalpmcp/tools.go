@@ -104,8 +104,8 @@ func (ts *toolset) instructions() string {
 	}
 	return "ScalpStream sells small, factual datasets per request over the x402 payment protocol " +
 		"(HTTP 402): US equity options research, federally tax-exempt municipal income, crypto " +
-		"candidates and staking yields, cheapest fuel, air quality, and US border-crossing wait " +
-		"times. Every tool returns JSON. " + mode
+		"candidates and staking yields, cheapest fuel, air quality, US border-crossing wait " +
+		"times, and active US product and vehicle recalls. Every tool returns JSON. " + mode
 }
 
 // callTimeout bounds a single tool call, including its paid fetch. It is
