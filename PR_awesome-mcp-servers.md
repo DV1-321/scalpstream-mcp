@@ -27,12 +27,14 @@ branch itself. This file stays on it and in the `wt_mcp_1009` worktree.
 
 - Repo: https://github.com/punkpeye/awesome-mcp-servers
 - Section: `### 💰 Finance & Fintech`. On 2026-10-09 the header was at line 2050
-  of `README.md`, with 434 entries and none of ours.
+  of `README.md`, with 434 entries and none of ours. A re-check later on 10-09
+  found it at line 2068 with 440 entries, still none of ours. The list grows
+  every day, so find the spot by the neighbour names below, not by line number.
 - Placement: CONTRIBUTING.md asks for alphabetical order inside each section.
   Put the line after `- [dqj1998/japan-company-info-mcp-bridge](...)` and before
-  `- [edge-claw/mood-booster-agent](...)`. That was lines 2188-2189 on 10-09.
-  Many recent entries were added at the top of the section, but the written rule
-  is alphabetical.
+  `- [edge-claw/mood-booster-agent](...)`. Those two were still next to each
+  other at the re-check (lines 2208-2209). Many recent entries were added at the
+  top of the section, but the written rule is alphabetical.
 - Do **not** add `🤖🤖🤖` to the title. CONTRIBUTING.md offers that fast track
   only "If you are an automated agent", and you are opening this PR yourself.
 
@@ -46,7 +48,9 @@ The Glama badge URL returned 200 on 2026-10-09.
 
 The description is one sentence of 169 characters, ending in a period like every
 other entry. On 10-09 the section's 434 descriptions had a median of 134
-characters, a 90th percentile of 155 and a maximum of 189. CONTRIBUTING.md asks
+characters, a 90th percentile of 155 and a maximum of 189. At the re-check (440
+entries) the median was 135 and the 90th percentile 155. One new entry has a
+273-character description, so 169 is still well within range. CONTRIBUTING.md asks
 for "concise and informative descriptions" in the existing style. "Market
 research" covers the options, municipal-income and crypto research tools.
 
