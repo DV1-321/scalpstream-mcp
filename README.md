@@ -1,7 +1,7 @@
 # ScalpStream MCP server
 
-**A client that buys pay-per-call data feeds — not a trading tool.** It places
-no orders and connects to no brokerage. With no key it returns free previews;
+**A client that buys pay-per-call data feeds — not a trading tool: it places no
+orders and connects to no brokerage.** With no key it returns free previews;
 with your own Base key it pays per call, under a per-call cap and a total budget.
 
 It buys small, factual datasets at call time with your own wallet, over

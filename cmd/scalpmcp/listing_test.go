@@ -12,8 +12,8 @@ import (
 
 // The README's tool table is what directories copy and what a reader sees
 // before installing anything. It drifted once already: product_recalls shipped
-// in v0.1.6 and the table kept listing eight tools while the server registered
-// nine. Nothing failed, because nothing compared the two.
+// in v0.1.3, and through v0.1.6 the table kept listing eight tools while the
+// server registered nine. Nothing failed, because nothing compared the two.
 //
 // This compares them both ways: every registered tool has a row, and every row
 // names a tool that is actually registered.

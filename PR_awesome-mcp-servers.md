@@ -1,15 +1,27 @@
-# Listing steps for scalpstream-mcp (for David to do by hand)
+# Listing steps for scalpstream-mcp (to do by hand)
 
 Nothing here has been opened, submitted or claimed. Each step needs your own
 GitHub, LobeHub or email identity, so it is yours to take. Checked 2026-10-09.
 
-**Do this first:** merge branch `mcp1009/listing-cleanup` into `main` and push it.
-Every site below reads the GitHub repo. Until it is pushed they still see the
-8-tool README and no `glama.json`. Merging does not need a release tag.
+**Do this first:** merge branch `mcp1009/listing-cleanup` into `main` without
+this file, then push `main`. Every site below reads the GitHub repo. Until it is
+pushed they still see the 8-tool README and no `glama.json`. Merging does not
+need a release tag.
 
-This repo is public, so this file would be public on `main` too. Nothing in it
-is secret, but if you would rather not publish it, run `git rm
-PR_awesome-mcp-servers.md` in the merge and keep a local copy.
+This file is a private checklist and the repo is public, so keep it off `main`.
+A plain merge would publish it twice: in the tree, and in the branch commit
+that added it. Squash-merge and drop it instead, in the scalpstream-mcp checkout:
+
+```powershell
+git switch main
+git merge --squash mcp1009/listing-cleanup
+git rm -f PR_awesome-mcp-servers.md
+git commit
+```
+
+In the commit editor, delete the bullet about this file, and change "since
+v0.1.6" to "since v0.1.3" (product_recalls shipped in v0.1.3). Do not push the
+branch itself. This file stays on it and in the `wt_mcp_1009` worktree.
 
 ## 1. punkpeye/awesome-mcp-servers
 
@@ -27,10 +39,16 @@ PR_awesome-mcp-servers.md` in the merge and keep a local copy.
 ### The line (copy exactly, one line)
 
 ```markdown
-- [DV1-321/scalpstream-mcp](https://github.com/DV1-321/scalpstream-mcp) [![DV1-321/scalpstream-mcp MCP server](https://glama.ai/mcp/servers/DV1-321/scalpstream-mcp/badges/score.svg)](https://glama.ai/mcp/servers/DV1-321/scalpstream-mcp) 🏎️ ☁️ 🍎 🪟 🐧 - Client that buys pay-per-call data feeds over x402, not a trading tool: options, municipal-income and crypto research, crypto yields, cheapest fuel, air quality, US border waits and product recalls. Free previews with no key; with your own Base key it pays USDC per call under a budget cap.
+- [DV1-321/scalpstream-mcp](https://github.com/DV1-321/scalpstream-mcp) [![DV1-321/scalpstream-mcp MCP server](https://glama.ai/mcp/servers/DV1-321/scalpstream-mcp/badges/score.svg)](https://glama.ai/mcp/servers/DV1-321/scalpstream-mcp) 🏎️ ☁️ 🍎 🪟 🐧 - Buys data per call over x402 with your Base key under a budget cap (free previews without one): market research, crypto yields, fuel, air quality, border waits, recalls.
 ```
 
 The Glama badge URL returned 200 on 2026-10-09.
+
+The description is one sentence of 169 characters, ending in a period like every
+other entry. On 10-09 the section's 434 descriptions had a median of 134
+characters, a 90th percentile of 155 and a maximum of 189. CONTRIBUTING.md asks
+for "concise and informative descriptions" in the existing style. "Market
+research" covers the options, municipal-income and crypto research tools.
 
 ### Icon legend (copied from that list's README, lines 51-71)
 
@@ -76,7 +94,7 @@ Add DV1-321/scalpstream-mcp to Finance & Fintech
 ```markdown
 Adds [scalpstream-mcp](https://github.com/DV1-321/scalpstream-mcp) to Finance & Fintech, in alphabetical order.
 
-It is an installable Go MCP server (stdio, MIT) that buys small datasets per call over x402: options, municipal-income and crypto research, crypto yields, cheapest fuel, air quality, US border waits and product recalls. It is a data-buying client, not a trading tool: it places no orders and connects to no brokerage.
+It is an installable Go MCP server (stdio, MIT) that buys small datasets per call over x402: options, municipal-income and crypto research, crypto yields, cheapest fuel, air quality, US border waits and product recalls. It only buys data: it places no orders, connects to no brokerage and gives no investment advice.
 
 - With no key it runs in preview-only mode: every paid tool returns the free preview plus the exact quoted price.
 - With the user's own Base key it pays USDC per call. A per-call cap and a per-process budget are both checked before anything is signed.
@@ -105,14 +123,20 @@ is slow.
 Expect a wait. There were 2,713 open PRs on 10-09, and 64 were merged from 09-24
 to 10-08.
 
-## 2. Glama (claim, then re-scan)
+## 2. Glama (already claimed: re-sync, then re-inspect)
 
+- The listing is already claimed. On 2026-10-09 its badge read "claimed by its
+  maintainer, tool definitions rated A, 8 tools, remote-capable, maintenance
+  rated B".
 - `glama.json` is in this branch with `{"$schema":"https://glama.ai/mcp/schemas/server.json","maintainers":["DV1-321"]}`.
   The schema URL resolves, and its `$id` matches. Glama's blog post
   glama.ai/blog/2025-07-08-what-is-glamajson describes the same format.
 - After the push, open https://glama.ai/mcp/servers/DV1-321/scalpstream-mcp,
-  sign in with GitHub as DV1-321 and claim it. Then ask for a re-scan or
-  re-inspection.
+  sign in with GitHub as DV1-321 and re-run the Claim ownership flow so Glama
+  syncs `glama.json`. The same blog post says to go through that flow again
+  after adding or updating the file. The page may show no "Claim" button,
+  because the listing is yours already; that is not a failure.
+- Then request a re-inspection (re-scan) so Glama sees 9 tools.
 - Glama counts tools by running the server. Its last run was 2026-08-07, which
   saw 8 tools, so it will keep showing 8 until it re-inspects. A README edit
   alone does not change that count.
@@ -146,17 +170,16 @@ Form at https://mcpservers.org/submit:
 | Contact Email | yours |
 | Plan | **Free** ($0, review within 2 weeks). Skip the $39 Premium. |
 
-If it asks for a description, use: "Client that buys pay-per-call data feeds
-over x402, not a trading tool: research, crypto yields, fuel prices, air quality,
-US border waits and product recalls. Free previews with no key; with your own
-Base key it pays USDC per call under a budget cap."
+If it asks for a description, use the awesome-list sentence: "Buys data per call
+over x402 with your Base key under a budget cap (free previews without one):
+market research, crypto yields, fuel, air quality, border waits, recalls."
 
 ## 5. MCP Market
 
 - At https://mcpmarket.com/submit, paste the repo URL
   https://github.com/DV1-321/scalpstream-mcp.
 - Take the free queue (average 4-6 weeks). Skip the paid fast track ($29 on
-  10-09, listed within 24 hours), which buys SEO, not buyers.
+  10-09, listed within 24 hours); it only shortens the wait.
 
 ## 6. Official MCP Registry (no action now)
 
