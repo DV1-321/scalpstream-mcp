@@ -1,0 +1,16 @@
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "AirScout",
+  "description": "Current US AQI and pollutants for any point on Earth, whether it is safe to exercise outdoors (EPA AirNow categories), and the cleanest and worst windows in the next 7 days. Plain GET with free previews; USDC 0.01 per query over x402 on Base, Arbitrum or Polygon, or XRP/RLUSD on the XRP Ledger. A2A 0.3.0 JSON-RPC at https://airscout.scalpstream.com/a2a, OpenAPI at https://airscout.scalpstream.com/openapi.json. Modelled data (Copernicus CAMS via Open-Meteo), not medical advice.",
+  "image": "https://airscout.scalpstream.com/icon.png",
+  "services": [
+    { "name": "web", "endpoint": "https://airscout.scalpstream.com/" },
+    { "name": "A2A", "endpoint": "https://airscout.scalpstream.com/.well-known/agent-card.json", "version": "0.3.0" },
+    { "name": "x402", "endpoint": "https://airscout.scalpstream.com/.well-known/x402" },
+    { "name": "email", "endpoint": "dfergin@wgu.edu" }
+  ],
+  "x402Support": true,
+  "active": true,
+  "registrations": [],
+  "supportedTrust": ["reputation"]
+}
