@@ -1,0 +1,16 @@
+{
+  "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
+  "name": "RecallScout",
+  "description": "Is this product or vehicle under an active US recall, and how urgent? One query across FDA food, drug and device recalls, NHTSA vehicle campaigns and CPSC consumer product recalls, with severity normalised onto CRITICAL/SERIOUS/MODERATE/LOW and the basis stated; returns firm, hazard, remedy, lot numbers and UPCs. Plain GET with free previews; USDC 0.01 per query over x402 on Base, Arbitrum or Polygon, or XRP/RLUSD on the XRP Ledger. A2A 0.3.0 JSON-RPC at https://recallscout.scalpstream.com/a2a, OpenAPI at https://recallscout.scalpstream.com/openapi.json.",
+  "image": "https://recallscout.scalpstream.com/icon.png",
+  "services": [
+    { "name": "web", "endpoint": "https://recallscout.scalpstream.com/" },
+    { "name": "A2A", "endpoint": "https://recallscout.scalpstream.com/.well-known/agent-card.json", "version": "0.3.0" },
+    { "name": "x402", "endpoint": "https://recallscout.scalpstream.com/.well-known/x402" },
+    { "name": "email", "endpoint": "dfergin@wgu.edu" }
+  ],
+  "x402Support": true,
+  "active": true,
+  "registrations": [],
+  "supportedTrust": ["reputation"]
+}
