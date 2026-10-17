@@ -17,8 +17,8 @@ installation. Only configure one if they explicitly ask for paid calls.
 
 ## Step 1 — Install the binary
 
-Requires Go 1.26.6 or newer (`go version`). On an older toolchain the build
-downloads 1.26.6 automatically unless `GOTOOLCHAIN=local` is set — if it is, the
+Requires Go 1.26.9 or newer (`go version`). On an older toolchain the build
+downloads 1.26.9 automatically unless `GOTOOLCHAIN=local` is set — if it is, the
 build fails until Go is upgraded.
 
 ```bash

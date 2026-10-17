@@ -26,7 +26,7 @@
 
 # Pinned by digest, not tag: a tag is mutable, so `golang:1.26-alpine` alone
 # means a rebuild months from now silently compiles against something else.
-FROM golang:1.26-alpine@sha256:ce864e7223ac17b1775e6fd0b4c0db580c2eb50e7953a427916379e4b92a1628 AS build
+FROM golang:1.26-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade AS build
 
 WORKDIR /src
 
