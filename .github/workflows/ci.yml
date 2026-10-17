@@ -21,6 +21,13 @@ permissions:
 
 jobs:
   test:
+    # This repository is public and the runner is one of David's own machines, so
+    # a pull request opened from a fork would run a stranger's code there. Only
+    # pushes and pull requests from branches of this repository run the job; a
+    # fork's PR gets no CI here, and is tested after it is pushed to a branch.
+    # The repository's Actions setting also holds every outside contributor's
+    # run for approval, but a click must never be the only thing in the way.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, linux]
     steps:
       - uses: actions/checkout@v7
