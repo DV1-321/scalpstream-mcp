@@ -3,7 +3,7 @@
   "name": "io.github.DV1-321/scalpstream-mcp",
   "title": "ScalpStream",
   "description": "Pay-per-call data for AI agents over x402 (USDC on Base): air quality and AQI, US border wait times, cheapest fuel prices, US product recalls, and options, crypto and dividend research. Preview-only mode with no wallet.",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "repository": {
     "url": "https://github.com/DV1-321/scalpstream-mcp",
     "source": "github"
@@ -12,7 +12,7 @@
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/dv1-321/scalpstream-mcp:v0.1.7",
+      "identifier": "ghcr.io/dv1-321/scalpstream-mcp:v0.1.8",
       "transport": {
         "type": "stdio"
       },
