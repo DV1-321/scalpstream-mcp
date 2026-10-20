@@ -2,6 +2,8 @@
 
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/dv1-321/scalpstream-mcp)
 
+Pay-per-call MCP server for Claude Desktop, Claude Code, Cursor and any MCP client: air quality (AQI), US border wait times, cheapest fuel prices, US product recalls, and options, crypto, dividend and DeFi-yield research, settled in USDC over x402 on Base.
+
 An MCP server that buys small, factual datasets at call time with your own
 wallet, over [x402](https://x402.org) — roughly **$0.01 a call**, no account, no
 subscription, no API key anywhere in the flow.
@@ -91,3 +93,11 @@ identical for every buyer. They are **not investment advice**, not personalised,
 and carry no trade plan, position sizing, or buy/sell verdict. The operator
 trades securities that appear in these feeds. Every response carries its own
 disclaimer and source attribution; read them.
+
+## Versions
+
+Releases are the Git tags on this repository (`v0.1.7` is current); each one is published to the MCP registry as `io.github.DV1-321/scalpstream-mcp` and as the `ghcr.io/dv1-321/scalpstream-mcp` image. See the [tags](https://github.com/DV1-321/scalpstream-mcp/tags).
+
+## License
+
+MIT - see [LICENSE](LICENSE).

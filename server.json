@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.DV1-321/scalpstream-mcp",
   "title": "ScalpStream",
-  "description": "Pay-per-call data over x402: air quality, border waits, fuel prices, market research.",
+  "description": "Pay-per-call data for AI agents over x402 (USDC on Base): air quality and AQI, US border wait times, cheapest fuel prices, US product recalls, and options, crypto and dividend research. Preview-only mode with no wallet.",
   "version": "0.1.7",
   "repository": {
     "url": "https://github.com/DV1-321/scalpstream-mcp",
