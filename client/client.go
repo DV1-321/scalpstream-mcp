@@ -21,12 +21,15 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -162,42 +165,53 @@ func (c *Client) Unconfirmed() (string, int) {
 // Fetch GETs url, paying if the server demands it.
 //
 // A 200 on the first try is returned as-is: a free endpoint costs nothing and is
-// never charged for. Only a 402 triggers the payment path.
+// never charged for. Only a 402 triggers the payment path. Callers that need to
+// know which of the two happened use FetchPaid; this form is kept for callers
+// that only want the bytes.
 func (c *Client) Fetch(ctx context.Context, url string) ([]byte, error) {
+	body, _, err := c.FetchPaid(ctx, url)
+	return body, err
+}
+
+// FetchPaid is Fetch, also reporting whether a payment was actually presented
+// and the resource delivered against it. paid=false with a nil error means the
+// server answered 200 to the unpaid request: nothing moved, and a caller must
+// not tell anyone it did.
+func (c *Client) FetchPaid(ctx context.Context, url string) (body []byte, paid bool, err error) {
 	resp, err := c.do(ctx, url, "")
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	body, status := resp.body, resp.status
 	if status == http.StatusOK {
-		return body, nil
+		return body, false, nil
 	}
 	if status != http.StatusPaymentRequired {
-		return nil, fmt.Errorf("x402client: %s: HTTP %d: %s", url, status, snippet(body, 300))
+		return nil, false, fmt.Errorf("x402client: %s: HTTP %d: %s", url, status, snippet(body, 300))
 	}
 
 	ch, err := decodeChallenge(resp.header.Get(x402.HeaderPaymentRequiredStd), body)
 	if err != nil {
-		return nil, fmt.Errorf("x402client: %s: %w", url, err)
+		return nil, false, fmt.Errorf("x402client: %s: %w", url, err)
 	}
 	opt, chainID, ok := findEVMOption(ch, c.PreferChainID)
 	if !ok {
-		return nil, &ErrPaymentRequired{Resource: url, Reason: "no EVM (eip155) option offered; this client can only pay USDC on an EVM rail"}
+		return nil, false, &ErrPaymentRequired{Resource: url, Reason: "no EVM (eip155) option offered; this client can only pay USDC on an EVM rail"}
 	}
 	quote := quoteOf(opt)
 
 	if c.Signer == nil {
-		return nil, &ErrPaymentRequired{Resource: url, Quote: quote,
-			Reason: "no spending key configured (set EVM_BASE_PRIVATE_KEY to enable paid calls)"}
+		return nil, false, &ErrPaymentRequired{Resource: url, Quote: quote,
+			Reason: "no spending key configured (set EVM_BASE_PRIVATE_KEY in the MCP server's environment to enable paid calls)"}
 	}
 
 	amount, ok := new(big.Int).SetString(opt.Amount, 10)
 	if !ok {
-		return nil, fmt.Errorf("x402client: %s: unparseable amount %q", url, opt.Amount)
+		return nil, false, fmt.Errorf("x402client: %s: unparseable amount %q", url, opt.Amount)
 	}
 	// Both limits are checked BEFORE signing, so a refusal costs nothing.
 	if amount.Cmp(c.maxPrice()) > 0 {
-		return nil, &ErrPaymentRequired{Resource: url, Quote: quote,
+		return nil, false, &ErrPaymentRequired{Resource: url, Quote: quote,
 			Reason: fmt.Sprintf("quoted %s exceeds the per-call cap of %s atomic units", opt.Amount, c.maxPrice())}
 	}
 	// RESERVE the spend against the budget, rather than checking and releasing
@@ -205,7 +219,7 @@ func (c *Client) Fetch(ctx context.Context, url string) ([]byte, error) {
 	// both pass a budget neither should have passed — harmless while the MCP
 	// server dispatched serially, and an overspend the moment it does not.
 	if err := c.reserve(amount); err != nil {
-		return nil, &ErrPaymentRequired{Resource: url, Quote: quote, Reason: err.Error()}
+		return nil, false, &ErrPaymentRequired{Resource: url, Quote: quote, Reason: err.Error()}
 	}
 	// From here on the reservation must be resolved on every path: settled if
 	// the resource arrives, released if we never presented a payment, or left
@@ -222,7 +236,7 @@ func (c *Client) Fetch(ctx context.Context, url string) ([]byte, error) {
 	domain := pay.TokenDomain{Name: name, Version: version, ChainID: chainID, Contract: opt.Asset}
 	exact, err := c.Signer.AuthorizeTransfer(domain, opt.PayTo, opt.Amount, 5*time.Minute)
 	if err != nil {
-		return nil, fmt.Errorf("x402client: %s: authorize: %w", url, err)
+		return nil, false, fmt.Errorf("x402client: %s: authorize: %w", url, err)
 	}
 
 	envelope := map[string]any{
@@ -233,18 +247,34 @@ func (c *Client) Fetch(ctx context.Context, url string) ([]byte, error) {
 	}
 	raw, err := json.Marshal(envelope)
 	if err != nil {
-		return nil, fmt.Errorf("x402client: encode payment: %w", err)
+		return nil, false, fmt.Errorf("x402client: encode payment: %w", err)
 	}
-	paid, err := c.do(ctx, url, base64.StdEncoding.EncodeToString(raw))
+	// A context already dead here has not sent anything: the signed payment
+	// never leaves the process, so the reservation goes back (via the defer).
+	if err := ctx.Err(); err != nil {
+		return nil, false, fmt.Errorf("x402client: %s: cancelled before the paid request was sent: %w", url, err)
+	}
+	paidResp, err := c.do(ctx, url, base64.StdEncoding.EncodeToString(raw))
 	if err != nil {
-		// The payment was on the wire. Whether the seller settled it before the
-		// transport failed is unknowable here, so the reservation stays held
-		// rather than being released back into the budget.
+		if neverSent(err) {
+			// The request never reached a socket: no name resolved, no
+			// connection, or the TLS handshake failed before a byte of HTTP was
+			// written. Nothing was presented to the seller, so the money is
+			// still ours and the reservation is released (via the defer).
+			// Holding it here was a self-inflicted outage: a feed host down for
+			// an hour turned every retry into $0.01 of "unconfirmed" budget
+			// until the whole budget was gone.
+			return nil, false, err
+		}
+		// Otherwise the payment may have been on the wire. Whether the seller
+		// settled it before the transport failed is unknowable here, so the
+		// reservation stays held rather than being released back into the
+		// budget.
 		c.markUnconfirmed()
 		settled = true
-		return nil, err
+		return nil, false, err
 	}
-	if paid.status != http.StatusOK {
+	if paidResp.status != http.StatusOK {
 		// The money may or may not have moved; say so rather than implying it did
 		// not, because the caller may need to reconcile.
 		//
@@ -255,13 +285,42 @@ func (c *Client) Fetch(ctx context.Context, url string) ([]byte, error) {
 		// budget counter that never moved.
 		c.markUnconfirmed()
 		settled = true
-		return nil, fmt.Errorf("x402client: %s: paid request returned HTTP %d (settlement state unknown, counted against the budget): %s",
-			url, paid.status, snippet(paid.body, 300))
+		return nil, false, fmt.Errorf("x402client: %s: paid request returned HTTP %d (settlement state unknown, counted against the budget): %s",
+			url, paidResp.status, snippet(paidResp.body, 300))
 	}
 	// Confirmed: move the reservation into settled spend.
 	c.commit(amount)
 	settled = true
-	return paid.body, nil
+	return paidResp.body, true, nil
+}
+
+// neverSent reports whether a transport error is one that is CERTAIN to have
+// happened before any request bytes were written: DNS failure, a failed dial
+// (refused, unreachable, dial timeout), or a TLS certificate the client itself
+// rejected during the handshake. Everything else — a reset mid-request, a read
+// timeout, a context cancelled during the round trip — is ambiguous, and
+// ambiguity keeps the money reserved.
+//
+// It is deliberately a whitelist. The cost of a false "never sent" is an
+// overspend against the budget; the cost of a false "maybe sent" is a stuck
+// reservation. The second is recoverable with a restart, the first is not.
+func neverSent(err error) bool {
+	var dns *net.DNSError
+	if errors.As(err, &dns) {
+		return true
+	}
+	var op *net.OpError
+	if errors.As(err, &op) && op.Op == "dial" {
+		return true
+	}
+	var verify *tls.CertificateVerificationError
+	if errors.As(err, &verify) {
+		return true
+	}
+	var unknownCA x509.UnknownAuthorityError
+	var hostname x509.HostnameError
+	var invalid x509.CertificateInvalidError
+	return errors.As(err, &unknownCA) || errors.As(err, &hostname) || errors.As(err, &invalid)
 }
 
 // reserve claims amount against the budget, counting money already committed to

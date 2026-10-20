@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -310,6 +311,140 @@ func TestArgumentsAcceptStringOrNumber(t *testing.T) {
 				t.Errorf("BuildURL(%v) = %s; expected lat and hours to survive", args, u)
 			}
 		}
+	}
+}
+
+// HUNT 10-20 M2. Boolean arguments arrive as JSON booleans, as strings, and
+// occasionally as 1/0. `args["smart"].(bool)` dropped every non-bool form
+// silently, so the wallet paid for the non-smart ranking the model had not
+// asked for. Every spelling of true must set the flag, every spelling of false
+// must not, and junk must be an error raised before any request.
+func TestBooleanArgumentsAcceptStringsAndRejectJunk(t *testing.T) {
+	ts := previewOnlyToolset()
+	fuelTool, recallTool := ts.byName["cheapest_fuel"], ts.byName["product_recalls"]
+	base := map[string]any{"country": "ES", "lat": 40.4, "lon": -3.7}
+
+	for _, v := range []any{true, "true", "TRUE", " True ", "1", "yes", "Yes", float64(1)} {
+		args := map[string]any{"country": "ES", "lat": 40.4, "lon": -3.7, "smart": v}
+		u, err := fuelTool.BuildURL(args)
+		if err != nil {
+			t.Fatalf("smart=%#v: %v", v, err)
+		}
+		if !strings.Contains(u, "smart=1") {
+			t.Errorf("smart=%#v (%T) was dropped: %s", v, v, u)
+		}
+		rargs := map[string]any{"product": "widget", "include_ended": v}
+		u, err = recallTool.BuildURL(rargs)
+		if err != nil {
+			t.Fatalf("include_ended=%#v: %v", v, err)
+		}
+		if !strings.Contains(u, "include_ended=1") {
+			t.Errorf("include_ended=%#v (%T) was dropped: %s", v, v, u)
+		}
+	}
+	for _, v := range []any{false, "false", "FALSE", "0", "no", "No", float64(0), "", nil} {
+		args := map[string]any{"country": "ES", "lat": 40.4, "lon": -3.7, "smart": v}
+		u, err := fuelTool.BuildURL(args)
+		if err != nil {
+			t.Fatalf("smart=%#v: %v", v, err)
+		}
+		if strings.Contains(u, "smart=") {
+			t.Errorf("smart=%#v (%T) should not set the flag: %s", v, v, u)
+		}
+	}
+	if u, err := fuelTool.BuildURL(base); err != nil || strings.Contains(u, "smart=") {
+		t.Errorf("absent smart: url=%s err=%v", u, err)
+	}
+
+	// Junk is an error that names the argument, and it is raised by BuildURL,
+	// so no request — paid or preview — is ever made for it.
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusPaymentRequired)
+	}))
+	defer srv.Close()
+	paidTS := newToolset(&client.Client{}, endpoints{Fuel: srv.URL, Recall: srv.URL})
+	for _, c := range []struct{ tool, args, key string }{
+		{"cheapest_fuel", `{"country":"ES","lat":40.4,"lon":-3.7,"smart":"maybe"}`, "smart"},
+		{"cheapest_fuel", `{"country":"ES","lat":40.4,"lon":-3.7,"smart":2}`, "smart"},
+		{"cheapest_fuel", `{"country":"ES","lat":40.4,"lon":-3.7,"smart":{"on":true}}`, "smart"},
+		{"product_recalls", `{"product":"widget","include_ended":"sure"}`, "include_ended"},
+		{"product_recalls", `{"product":"widget","include_ended":[true]}`, "include_ended"},
+	} {
+		_, _, err := paidTS.call(context.Background(), c.tool, json.RawMessage(c.args))
+		if err == nil {
+			t.Errorf("%s(%s) should have been refused", c.tool, c.args)
+			continue
+		}
+		if !strings.Contains(err.Error(), c.key) || !strings.Contains(err.Error(), "boolean") {
+			t.Errorf("%s(%s) error = %q, want it to name %s and say boolean", c.tool, c.args, err, c.key)
+		}
+	}
+	if n := atomic.LoadInt32(&hits); n != 0 {
+		t.Errorf("a bad boolean reached the server %d times; it must be refused before any request", n)
+	}
+}
+
+// HUNT 10-20 L1. A 200 on the unpaid request is a free resource — a mirror, a
+// CDN cache, a feed with its gate down — and the envelope used to say
+// paid:true for it. The model then reports a charge that payment_status
+// cannot show. The envelope must say what actually happened.
+func TestFreeResourceIsRenderedAsUnpaid(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"picks":[]}`)) // 200, no challenge
+	}))
+	defer srv.Close()
+
+	ts := newToolset(&client.Client{}, endpoints{Feed: srv.URL})
+	out, structured, err := ts.call(context.Background(), "options_research", json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("a free 200 is a success: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, structured) {
+		t.Error("structuredContent and the text block disagree")
+	}
+	if got["paid"] != false {
+		t.Errorf("paid = %v for a resource that was never challenged; want false", got["paid"])
+	}
+	if got["complete"] != true {
+		t.Errorf("complete = %v; the server returned the resource itself, not a preview", got["complete"])
+	}
+	if note, _ := got["note"].(string); !strings.Contains(note, "without a payment challenge") {
+		t.Errorf("note = %q, want it to explain why paid is false", note)
+	}
+	if got["source"] != srv.URL+"/picks" {
+		t.Errorf("source = %v", got["source"])
+	}
+}
+
+// The text a model reads when payment is not possible must send the key to the
+// server's environment, never into the conversation.
+func TestHowToEnableNeverAsksForTheKeyInChat(t *testing.T) {
+	for name, text := range map[string]string{
+		"howToEnable":  howToEnable,
+		"instructions": previewOnlyToolset().instructions(),
+	} {
+		low := strings.ToLower(text)
+		if !strings.Contains(text, "EVM_BASE_PRIVATE_KEY") {
+			t.Errorf("%s does not name the variable", name)
+		}
+		if !strings.Contains(low, "environment") {
+			t.Errorf("%s does not say the key goes in the server's environment: %q", name, text)
+		}
+		if !strings.Contains(low, "chat") || !strings.Contains(low, "never") {
+			t.Errorf("%s does not forbid asking for the key in chat: %q", name, text)
+		}
+	}
+	// And the payment_status envelope carries the same wording.
+	st := previewOnlyToolset().status()
+	if data := st["data"].(map[string]any); data["how_to_enable"] != howToEnable {
+		t.Errorf("payment_status.how_to_enable = %v", data["how_to_enable"])
 	}
 }
 

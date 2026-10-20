@@ -2,9 +2,13 @@ package client_test
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
+	"io"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -341,6 +345,143 @@ func TestBudgetHoldsUnderConcurrentCalls(t *testing.T) {
 	if spent != want.String() {
 		t.Errorf("spent = %s, want %s for %d calls", spent, want, calls)
 	}
+}
+
+// FetchPaid must say which of the two things happened: a free 200, or a payment
+// presented and the resource delivered against it.
+func TestFetchPaidReportsWhetherMoneyMoved(t *testing.T) {
+	free := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"free":true}`))
+	}))
+	defer free.Close()
+	c := &client.Client{Signer: testSigner(t)}
+	body, paid, err := c.FetchPaid(context.Background(), free.URL)
+	if err != nil || paid || string(body) != `{"free":true}` {
+		t.Errorf("free 200: body=%s paid=%v err=%v; want the body, paid=false", body, paid, err)
+	}
+
+	gated, seen := challengeServer(t, "10000")
+	body, paid, err = c.FetchPaid(context.Background(), gated.URL)
+	if err != nil || !paid || string(body) != `{"data":"the goods"}` {
+		t.Errorf("paid 200: body=%s paid=%v err=%v; want the goods, paid=true", body, paid, err)
+	}
+	if *seen != 1 {
+		t.Errorf("server saw %d payments, want 1", *seen)
+	}
+}
+
+// scriptedTransport answers the unpaid request with a 402 challenge and the
+// paid retry with whatever error the test scripts, so the client's reaction to
+// a specific transport failure can be pinned without a real network fault.
+type scriptedTransport struct {
+	paidErr error
+	calls   int32
+}
+
+func (s *scriptedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	atomic.AddInt32(&s.calls, 1)
+	if r.Header.Get("PAYMENT-SIGNATURE") != "" {
+		return nil, s.paidErr
+	}
+	body := `{"x402Version":2,"accepts":[{"scheme":"exact","network":"eip155:8453","amount":"10000",` +
+		`"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","payTo":"0x1111111111111111111111111111111111111111",` +
+		`"extra":{"name":"USD Coin","version":"2"}}]}`
+	return &http.Response{StatusCode: http.StatusPaymentRequired, Header: http.Header{},
+		Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+}
+
+// HUNT 10-20 L2. A paid request that never left the process — no DNS, no
+// connection, a certificate the client itself rejected — was counted as
+// "unconfirmed" and its reservation held for the life of the process. A feed
+// host down for an hour then exhausted the whole budget on money that was never
+// presented to anyone. Those errors must release the reservation; errors that
+// MAY have followed a sent request must keep holding it.
+func TestNeverSentFailuresReleaseTheReservation(t *testing.T) {
+	released := []error{
+		&net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connectex: connection refused")},
+		&net.OpError{Op: "dial", Net: "tcp", Err: &net.DNSError{Err: "no such host", Name: "feed.invalid", IsNotFound: true}},
+		&net.DNSError{Err: "server misbehaving", Name: "feed.invalid"},
+		&tls.CertificateVerificationError{Err: x509.UnknownAuthorityError{}},
+		x509.HostnameError{Host: "feed.scalpstream.com"},
+		x509.CertificateInvalidError{Reason: x509.Expired},
+	}
+	for _, perr := range released {
+		rt := &scriptedTransport{paidErr: perr}
+		c := &client.Client{Signer: testSigner(t), HTTP: &http.Client{Transport: rt}}
+		_, paid, err := c.FetchPaid(context.Background(), "http://feed.invalid/picks")
+		if err == nil || paid {
+			t.Fatalf("%v: expected a failure with paid=false, got paid=%v err=%v", perr, paid, err)
+		}
+		if held, n := c.Unconfirmed(); held != "0" || n != 0 {
+			t.Errorf("%T %v: left %s held over %d unconfirmed; nothing was sent, so want 0/0", perr, perr, held, n)
+		}
+		if spent, calls := c.Spent(); spent != "0" || calls != 0 {
+			t.Errorf("%v: recorded spend %s/%d for a request that never left", perr, spent, calls)
+		}
+	}
+
+	held := []error{
+		&net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection reset by peer")},
+		&net.OpError{Op: "write", Net: "tcp", Err: errors.New("broken pipe")},
+		errors.New("net/http: timeout awaiting response headers"),
+		context.DeadlineExceeded,
+		context.Canceled,
+		io.ErrUnexpectedEOF,
+	}
+	for _, perr := range held {
+		rt := &scriptedTransport{paidErr: perr}
+		c := &client.Client{Signer: testSigner(t), HTTP: &http.Client{Transport: rt}}
+		if _, _, err := c.FetchPaid(context.Background(), "http://feed.invalid/picks"); err == nil {
+			t.Fatalf("%v: expected a failure", perr)
+		}
+		if held, n := c.Unconfirmed(); held != "10000" || n != 1 {
+			t.Errorf("%v: held %s over %d; the request may have been sent, so want 10000/1", perr, held, n)
+		}
+	}
+}
+
+// A context already cancelled when the paid request would be sent must not
+// send it, and must not hold the reservation for a payment that never left.
+func TestCancelledBeforeSendReleasesTheReservation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	rt := &cancellingTransport{cancel: cancel}
+	c := &client.Client{Signer: testSigner(t), HTTP: &http.Client{Transport: rt}}
+	_, paid, err := c.FetchPaid(ctx, "http://feed.invalid/picks")
+	if err == nil || paid || !errors.Is(err, context.Canceled) {
+		t.Fatalf("got paid=%v err=%v, want a context.Canceled failure", paid, err)
+	}
+	if n := atomic.LoadInt32(&rt.calls); n != 1 {
+		t.Errorf("transport saw %d requests; the paid retry must not be sent on a dead context", n)
+	}
+	if held, n := c.Unconfirmed(); held != "0" || n != 0 {
+		t.Errorf("held %s over %d unconfirmed for a request that was never sent", held, n)
+	}
+	// The budget is intact: the next call can still pay.
+	gated, seen := challengeServer(t, "10000")
+	c.HTTP = nil
+	if _, paid, err := c.FetchPaid(context.Background(), gated.URL); err != nil || !paid || *seen != 1 {
+		t.Errorf("after a cancelled call the budget must still be usable: paid=%v err=%v seen=%d", paid, err, *seen)
+	}
+}
+
+// cancellingTransport serves the 402 and cancels the caller's context while
+// doing so, so the context is dead by the time the paid retry would go out.
+type cancellingTransport struct {
+	cancel context.CancelFunc
+	calls  int32
+}
+
+func (s *cancellingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	atomic.AddInt32(&s.calls, 1)
+	if r.Header.Get("PAYMENT-SIGNATURE") != "" {
+		return nil, errors.New("the paid request must not have been sent")
+	}
+	s.cancel()
+	body := `{"x402Version":2,"accepts":[{"scheme":"exact","network":"eip155:8453","amount":"10000",` +
+		`"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","payTo":"0x1111111111111111111111111111111111111111",` +
+		`"extra":{"name":"USD Coin","version":"2"}}]}`
+	return &http.Response{StatusCode: http.StatusPaymentRequired, Header: http.Header{},
+		Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 }
 
 // A call the client REFUSED must not leave money reserved, or a budget bleeds

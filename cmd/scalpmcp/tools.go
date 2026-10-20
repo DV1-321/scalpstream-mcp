@@ -97,7 +97,8 @@ func (ts *toolset) list() []map[string]any {
 }
 
 func (ts *toolset) instructions() string {
-	mode := "PREVIEW-ONLY: no spending key is configured, so paid tools return the free preview plus the exact price. Set EVM_BASE_PRIVATE_KEY to enable paid calls."
+	mode := "PREVIEW-ONLY: no spending key is configured, so paid tools return the free preview plus the exact price. " +
+		"To enable paid calls the user adds EVM_BASE_PRIVATE_KEY to this server's environment and restarts it; never ask for the key in chat."
 	if ts.client.CanPay() {
 		spent, calls := ts.client.Spent()
 		mode = fmt.Sprintf("PAID MODE: calls settle USDC on Base at roughly $0.01 each. Spent so far: %s atomic units over %d calls.", spent, calls)
@@ -107,6 +108,14 @@ func (ts *toolset) instructions() string {
 		"candidates and staking yields, cheapest fuel, air quality, and US border-crossing wait " +
 		"times. Every tool returns JSON. " + mode
 }
+
+// howToEnable is returned INTO the model's context whenever a paid call could
+// not be made. It has to say where the key goes, because an eager agent reading
+// "set EVM_BASE_PRIVATE_KEY" will otherwise ask the user to paste it into the
+// conversation — and a spending key in a chat transcript is a spent key.
+const howToEnable = "Ask the user to add EVM_BASE_PRIVATE_KEY (a throwaway Base-mainnet key holding a little USDC) " +
+	"to the MCP server's environment — the env block of this server's entry in the MCP client's config — " +
+	"and restart the server. Never request, accept or echo the key in chat. Gas is sponsored by the facilitator, so no ETH is needed."
 
 // callTimeout bounds a single tool call, including its paid fetch. It is
 // generous because abandoning a PAID request loses the money — settlement runs
@@ -141,14 +150,22 @@ func (ts *toolset) call(ctx context.Context, name string, rawArgs json.RawMessag
 		return "", nil, err
 	}
 
-	body, err := ts.client.Fetch(ctx, target)
+	body, paid, err := ts.client.FetchPaid(ctx, target)
 	if err == nil {
-		return render(map[string]any{
-			"paid":     true,
+		out := map[string]any{
+			"paid":     paid,
 			"source":   target,
 			"complete": true,
 			"data":     json.RawMessage(body),
-		})
+		}
+		if !paid {
+			// The server answered the unpaid request with 200: a mirror, a
+			// cache, or a feed with its gate down. The data is whatever it
+			// served, and no money moved — saying paid:true here would have
+			// the model report a charge that payment_status cannot show.
+			out["note"] = "The resource was served without a payment challenge, so nothing was charged."
+		}
+		return render(out)
 	}
 
 	// Payment refused or impossible: return the free preview and the exact price
@@ -162,7 +179,7 @@ func (ts *toolset) call(ctx context.Context, name string, rawArgs json.RawMessag
 			"complete": false,
 			"reason":   pay.Reason,
 			"price":    pay.Quote,
-			"howto":    "Set EVM_BASE_PRIVATE_KEY to a Base-mainnet key holding a little USDC. Gas is sponsored by the facilitator, so no ETH is needed.",
+			"howto":    howToEnable,
 			"note":     "This is the FREE PREVIEW, not the paid dataset. The paid call returns the full result described by this tool.",
 		}
 		preview, perr := ts.client.Fetch(ctx, t.Preview)
@@ -253,7 +270,7 @@ func (ts *toolset) status() map[string]any {
 			"Counted against the budget, because a payment on the wire is a payment."
 	}
 	if !ts.client.CanPay() {
-		st["how_to_enable"] = "Set EVM_BASE_PRIVATE_KEY to a throwaway Base-mainnet key holding a little USDC, then restart the MCP server."
+		st["how_to_enable"] = howToEnable
 	}
 	return map[string]any{
 		"paid":     false, // this tool costs nothing
@@ -290,6 +307,47 @@ func argNum(args map[string]any, key string) (float64, bool) {
 		return f, err == nil
 	default:
 		return 0, false
+	}
+}
+
+// argBool reads a boolean argument. Models send booleans as JSON true/false, as
+// the strings "true"/"false"/"1"/"0"/"yes"/"no" in any case, and occasionally as
+// the numbers 1/0; all of those are accepted. Anything else is an error, and
+// the error is raised by BuildURL — BEFORE any request, so a bad flag costs a
+// message rather than a paid call.
+//
+// ok=false means the argument was absent (or an empty string), not false. The
+// distinction matters to a caller that wants "omitted" to mean the default.
+//
+// The old code was `args["smart"].(bool)`: a string "true" was silently treated
+// as absent, the wallet paid, and the feed returned the dataset the model had
+// NOT asked for, labelled complete.
+func argBool(args map[string]any, key string) (val, ok bool, err error) {
+	switch v := args[key].(type) {
+	case nil:
+		return false, false, nil
+	case bool:
+		return v, true, nil
+	case float64:
+		switch v {
+		case 1:
+			return true, true, nil
+		case 0:
+			return false, true, nil
+		}
+		return false, false, fmt.Errorf("%s must be a boolean (true/false), got %v", key, v)
+	case string:
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "":
+			return false, false, nil
+		case "true", "1", "yes":
+			return true, true, nil
+		case "false", "0", "no":
+			return false, true, nil
+		}
+		return false, false, fmt.Errorf("%s must be a boolean (true/false), got %q", key, v)
+	default:
+		return false, false, fmt.Errorf("%s must be a boolean (true/false), got %T", key, v)
 	}
 }
 
@@ -421,7 +479,11 @@ func buildTools(e endpoints) []tool {
 					q.Set("lat", lat)
 					q.Set("lon", lon)
 				}
-				if s, ok := args["smart"].(bool); ok && s {
+				smart, _, err := argBool(args, "smart")
+				if err != nil {
+					return "", err
+				}
+				if smart {
 					q.Set("smart", "1")
 				}
 				return e.Fuel + "/fuel?" + q.Encode(), nil
@@ -549,7 +611,11 @@ func buildTools(e endpoints) []tool {
 					q.Set("model", md)
 					q.Set("year", strconv.Itoa(int(yr)))
 				}
-				if v, ok := args["include_ended"].(bool); ok && v {
+				ended, _, err := argBool(args, "include_ended")
+				if err != nil {
+					return "", err
+				}
+				if ended {
 					q.Set("include_ended", "1")
 				}
 				if n, ok := argNum(args, "limit"); ok && n > 0 {
