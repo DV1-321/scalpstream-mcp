@@ -21,10 +21,16 @@ import (
 
 // protocolVersion is the spec revision this server implements.
 //
-// Deliberately 2025-06-18 and not the newer 2026-07-28: that revision redefines
-// tools/call to return a task handle the client then polls, which is a breaking
-// change to the one method that matters here. 2025-06-18 is what deployed
-// clients speak, and version negotiation lets a newer client step down to it.
+// Deliberately 2025-06-18 and not the newer 2026-07-28. That revision removes
+// the initialize handshake and sessions and replaces them with a mandatory
+// server/discover method; tasks (a tools/call that returns a handle the client
+// polls) are optional in it, not the default. A 2026-07-28 client therefore
+// opens with server/discover, and the right answer from a server that does not
+// speak that revision is JSON-RPC -32601 (method not found): the spec names it
+// as the signal to fall back to initialize and 2025-06-18 negotiation, which
+// this server does speak. Answering server/discover with anything else would
+// claim a revision we do not implement. 2025-06-18 is what deployed clients
+// speak, and version negotiation lets a newer client step down to it.
 const protocolVersion = "2025-06-18"
 
 // JSON-RPC error codes used here (from the JSON-RPC 2.0 spec).
@@ -201,6 +207,15 @@ func (s *server) handle(req *rpcRequest) {
 		}
 	case "notifications/cancelled":
 		s.handleCancelled(req)
+	case "server/discover":
+		// The 2026-07-28 opening call. Explicitly -32601, not an accident of the
+		// default branch: it is the documented fallback signal (see
+		// protocolVersion), and a future "handle everything else" branch must
+		// not quietly start answering it with something that is not discovery.
+		if !isNotification {
+			s.writeError(req.ID, codeMethodNotFound,
+				"server/discover is not implemented: this server speaks MCP "+protocolVersion+"; call initialize", nil)
+		}
 	default:
 		if !isNotification {
 			s.writeError(req.ID, codeMethodNotFound, "unknown method: "+req.Method, nil)

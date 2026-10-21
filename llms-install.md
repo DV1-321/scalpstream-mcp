@@ -6,20 +6,33 @@ this server up on a user's machine. Follow it top to bottom.
 ## What you are installing
 
 An MCP server that buys small factual datasets at call time over the x402
-payment protocol — air quality, US border-crossing waits, fuel prices, and market
-research — for about $0.01 a call. There is no account to create and no API key
-to obtain.
+payment protocol — US product recalls, US border-crossing waits, fuel prices,
+air quality, and market research — for about $0.01 a call. There is no account
+to create and no API key to obtain.
+
+The tools are `product_recalls`, `border_crossings`, `cheapest_fuel`,
+`air_quality`, `options_research`, `municipal_income`, `crypto_research` and the
+local `payment_status`. `crypto_yields` was withdrawn in 0.1.10 (data licence):
+if a listing or an older install still shows it, do not call it — the service
+behind it returns 404.
 
 **Install it without a wallet first.** The server is fully functional in
 preview-only mode: every paid tool returns the service's free preview plus the
 exact quoted price. Do not ask the user for a private key to complete the
 installation. Only configure one if they explicitly ask for paid calls.
 
-## Step 1 — Install the binary
+## Step 1 — Install
 
-Requires Go 1.26.9 or newer (`go version`). On an older toolchain the build
-downloads 1.26.9 automatically unless `GOTOOLCHAIN=local` is set — if it is, the
-build fails until Go is upgraded.
+**Docker, if `docker version` works.** No toolchain needed; the image speaks
+MCP over stdin/stdout, so `-i` is required:
+
+```bash
+docker run --rm -i ghcr.io/dv1-321/scalpstream-mcp:latest
+```
+
+**Otherwise Go.** Requires Go 1.26.9 or newer (`go version`). On an older
+toolchain the build downloads 1.26.9 automatically unless `GOTOOLCHAIN=local` is
+set — if it is, the build fails until Go is upgraded.
 
 ```bash
 go install github.com/DV1-321/scalpstream-mcp/cmd/scalpmcp@latest
@@ -34,15 +47,22 @@ their shell profile.
 echo "$(go env GOPATH)/bin/scalpmcp"
 ```
 
-No Go toolchain? A container image is published instead:
-
-```bash
-docker run --rm -i ghcr.io/dv1-321/scalpstream-mcp:latest
-```
-
 ## Step 2 — Add it to the MCP settings
 
-Preview-only (recommended default — no key, no spending):
+Preview-only (recommended default — no key, no spending). Docker:
+
+```json
+{
+  "mcpServers": {
+    "scalpstream": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "ghcr.io/dv1-321/scalpstream-mcp:latest"]
+    }
+  }
+}
+```
+
+Go binary:
 
 ```json
 {
@@ -54,7 +74,9 @@ Preview-only (recommended default — no key, no spending):
 }
 ```
 
-Use the absolute path from Step 1 if `scalpmcp` is not on `PATH`.
+Use the absolute path from Step 1 if `scalpmcp` is not on `PATH`. For Claude
+Code the equivalent is
+`claude mcp add scalpstream -- docker run -i --rm ghcr.io/dv1-321/scalpstream-mcp:latest`.
 
 ## Step 3 — Verify
 
@@ -79,9 +101,10 @@ full dataset or the free preview:
 configured and nothing can be charged.** If it says true, a key is present —
 check `EVM_BASE_PRIVATE_KEY` in the environment before making any call.
 
-Then try `air_quality` with `{"lat": 47.6588, "lon": -117.4260}`. With no key it
-comes back `"paid": false, "complete": false` with the free preview under `data`
-and the exact quote under `price` — that is success, not an error.
+Then try `product_recalls` with `{"product": "infant formula"}` (or
+`air_quality` with `{"lat": 47.6588, "lon": -117.4260}`). With no key it comes
+back `"paid": false, "complete": false` with the free preview under `data` and
+the exact quote under `price` — that is success, not an error.
 
 ## Optional — enabling paid calls
 
@@ -102,6 +125,10 @@ Only do this if the user asks. It spends real money.
 }
 ```
 
+With Docker, keep the key in the same `env` block and forward it by NAME only —
+`"args": ["run", "-i", "--rm", "-e", "EVM_BASE_PRIVATE_KEY", "ghcr.io/dv1-321/scalpstream-mcp:latest"]` —
+so the value never appears in the command line.
+
 Tell the user plainly:
 
 - The key must control a **Base mainnet** address holding a little USDC. Gas is
@@ -120,6 +147,8 @@ Tell the user plainly:
 | Symptom | Cause |
 |---|---|
 | `command not found: scalpmcp` | `$(go env GOPATH)/bin` is not on `PATH`. Use the absolute path in the config. |
+| The container exits immediately | It was started without `-i`, so it got no stdin and read EOF. |
+| A tool named `crypto_yields` returns 404 | Withdrawn in 0.1.10 (data licence). Upgrade the image or binary; nothing was charged. |
 | Client reports a parse error or drops the connection | Something is writing to stdout. This server writes only JSON-RPC there and all diagnostics to stderr, so suspect a wrapper script. |
 | A paid tool returns `"paid": false` with a price | Expected with no key. Not an error. |
 | `EVM_BASE_PRIVATE_KEY is set but unusable` | The key is not a 32-byte hex value. It fails fast on purpose rather than silently falling back to preview mode. |

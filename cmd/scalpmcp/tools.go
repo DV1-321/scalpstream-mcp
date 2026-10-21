@@ -104,10 +104,15 @@ func (ts *toolset) instructions() string {
 		spent, calls := ts.client.Spent()
 		mode = fmt.Sprintf("PAID MODE: calls settle USDC on Base at roughly $0.01 each. Spent so far: %s atomic units over %d calls.", spent, calls)
 	}
+	// The domain list is the tool catalogue in prose, and it must stay in step
+	// with buildTools: a domain named here that no tool serves sends a model
+	// looking for a tool that is not there (staking yields, after 0.1.10), and
+	// a tool left out of it is one a model never thinks to call (recalls, before).
+	// TestInstructionsNameEveryToolDomainAndNothingElse pins both directions.
 	return "ScalpStream sells small, factual datasets per request over the x402 payment protocol " +
 		"(HTTP 402): US equity options research, federally tax-exempt municipal income, crypto " +
-		"candidates and staking yields, cheapest fuel, air quality, and US border-crossing wait " +
-		"times. Every tool returns JSON. " + mode
+		"candidates, cheapest fuel, air quality, US border-crossing wait times and US product " +
+		"recalls. Every tool returns JSON. " + mode
 }
 
 // howToEnable is returned INTO the model's context whenever a paid call could
@@ -459,25 +464,18 @@ func buildTools(e endpoints) []tool {
 		{
 			Name:  "crypto_research",
 			Title: "Cryptocurrency candidates",
-			Description: "Ranked cryptocurrency candidates using the same technical signals as the equity feed (RSI, ATR, " +
+			Description: "Ranked cryptocurrency candidates using the same technical readings as the equity feed (RSI, ATR, " +
 				"VWAP, momentum) plus a macro overlay from the Fear & Greed index and news sentiment. Impersonal " +
 				"research data, not advice.",
 			Schema:   noArgs,
 			Preview:  e.Feed + "/preview-crypto",
-			Output:   envelopeSchema("Ranked cryptocurrency candidates with technical signals and the macro overlay (Fear & Greed, news sentiment)."),
+			Output:   envelopeSchema("Ranked cryptocurrency candidates with technical readings and the macro overlay (Fear & Greed, news sentiment)."),
 			BuildURL: func(map[string]any) (string, error) { return e.Feed + "/crypto", nil },
 		},
-		{
-			Name:  "crypto_yields",
-			Title: "Crypto staking and interest yields",
-			Description: "Where to earn interest or staking rewards on crypto and stablecoins: DeFi staking APY, " +
-				"stablecoin lending and savings rates, and liquidity-pool yields across CeFi platforms and DeFi " +
-				"protocols, risk-adjusted by pool depth (TVL) and base-versus-emission share, with A/B/C ratings.",
-			Schema:   noArgs,
-			Preview:  e.Feed + "/preview-yields",
-			Output:   envelopeSchema("Staking, lending and liquidity-pool yields with TVL, base-versus-emission share and an A/B/C risk rating per venue."),
-			BuildURL: func(map[string]any) (string, error) { return e.Feed + "/yields", nil },
-		},
+		// crypto_yields (feed /yields and /preview-yields) was withdrawn in 0.1.10:
+		// its upstream data licence does not permit resale. The feed endpoint is
+		// going away too, so a tool pointing at it would be a paid 404. Withdrawn
+		// tools are listed in CHANGELOG.md; do not re-add one without a licence.
 		{
 			Name:  "cheapest_fuel",
 			Title: "Cheapest fuel near a location",

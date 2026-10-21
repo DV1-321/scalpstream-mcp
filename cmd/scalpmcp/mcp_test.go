@@ -113,8 +113,11 @@ func TestToolsListShape(t *testing.T) {
 	got := drive(t, previewOnlyToolset(), `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
 	res := got[0]["result"].(map[string]any)
 	tools, _ := res["tools"].([]any)
-	if len(tools) < 8 {
-		t.Fatalf("expected at least 8 tools, got %d", len(tools))
+	// Exact, not "at least": a withdrawn tool creeping back in — crypto_yields
+	// in 0.1.10, whose feed endpoint is gone — would be a paid 404, and an
+	// unlisted new one would be unreachable. Both change this number.
+	if len(tools) != expectedToolCount {
+		t.Fatalf("expected exactly %d tools, got %d", expectedToolCount, len(tools))
 	}
 	seen := map[string]bool{}
 	for _, raw := range tools {
@@ -140,13 +143,126 @@ func TestToolsListShape(t *testing.T) {
 			t.Errorf("%s inputSchema has no properties key", name)
 		}
 	}
-	for _, want := range []string{
-		"options_research", "municipal_income", "crypto_research", "crypto_yields",
-		"cheapest_fuel", "air_quality", "border_crossings", "product_recalls", "payment_status",
-	} {
+	for _, want := range expectedTools {
 		if !seen[want] {
 			t.Errorf("tool %q is missing", want)
 		}
+	}
+	for _, gone := range withdrawnTools {
+		if seen[gone] {
+			t.Errorf("tool %q was withdrawn (see CHANGELOG.md) and must not be listed", gone)
+		}
+	}
+}
+
+// The catalogue as of 0.1.10. crypto_yields was withdrawn in 0.1.10 because its
+// upstream data licence does not permit resale; the feed's /yields endpoint
+// goes away with it, so listing the tool would sell a 404.
+var (
+	expectedTools = []string{
+		"options_research", "municipal_income", "crypto_research",
+		"cheapest_fuel", "air_quality", "border_crossings", "product_recalls", "payment_status",
+	}
+	expectedToolCount = len(expectedTools)
+	withdrawnTools    = []string{"crypto_yields"}
+)
+
+// GROWTH 10-21 MCP-2. The initialize instructions are the catalogue in prose,
+// and they had drifted from it both ways: they named "staking yields" (a tool
+// being withdrawn) and never mentioned recalls (a tool that shipped in 0.1.8).
+// A model reads this text to decide what the server is for, so each remaining
+// domain must be named and no withdrawn one may be.
+func TestInstructionsNameEveryToolDomainAndNothingElse(t *testing.T) {
+	text := strings.ToLower(previewOnlyToolset().instructions())
+	for _, domain := range []string{"options", "municipal", "crypto", "fuel", "air quality", "border", "recalls"} {
+		if !strings.Contains(text, domain) {
+			t.Errorf("instructions do not mention %q: %q", domain, text)
+		}
+	}
+	for _, gone := range []string{"yield", "staking"} {
+		if strings.Contains(text, gone) {
+			t.Errorf("instructions still mention %q, a withdrawn tool: %q", gone, text)
+		}
+	}
+	// No tool refers to the withdrawn feed endpoints either.
+	for _, tl := range previewOnlyToolset().tools {
+		if strings.Contains(tl.Preview, "yields") {
+			t.Errorf("%s previews from %s, a withdrawn endpoint", tl.Name, tl.Preview)
+		}
+		if tl.BuildURL != nil {
+			if u, err := tl.BuildURL(map[string]any{"country": "US", "region": "CA", "product": "x", "lat": 1, "lon": 1}); err == nil && strings.Contains(u, "yields") {
+				t.Errorf("%s buys from %s, a withdrawn endpoint", tl.Name, u)
+			}
+		}
+	}
+}
+
+// GROWTH 10-21 MCP-2. MCP 2026-07-28 opens with server/discover instead of
+// initialize. This server speaks 2025-06-18, and the documented signal for a
+// newer client to fall back to initialize is -32601 on server/discover: a
+// JSON-RPC error with exactly that code, carrying the request's id, and the
+// session must go on to answer initialize afterwards.
+func TestServerDiscoverIsMethodNotFoundSoClientsFallBack(t *testing.T) {
+	got := drive(t, previewOnlyToolset(),
+		`{"jsonrpc":"2.0","id":"disc-1","method":"server/discover","params":{}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"initialize","params":{"protocolVersion":"2026-07-28","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 responses, got %d: %v", len(got), got)
+	}
+	e, ok := got[0]["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("server/discover must be a JSON-RPC error, got %v", got[0])
+	}
+	if int(e["code"].(float64)) != codeMethodNotFound {
+		t.Errorf("server/discover code = %v, want %d", e["code"], codeMethodNotFound)
+	}
+	if got[0]["id"] != "disc-1" {
+		t.Errorf("error carries id %v, want the request's id", got[0]["id"])
+	}
+	if msg, _ := e["message"].(string); !strings.Contains(msg, "initialize") {
+		t.Errorf("message %q should point the client at initialize", msg)
+	}
+	// The fallback: initialize from a client that asked for the newer revision
+	// is answered with the one we speak, not echoed back.
+	res, ok := got[1]["result"].(map[string]any)
+	if !ok {
+		t.Fatalf("initialize after server/discover must still succeed: %v", got[1])
+	}
+	if res["protocolVersion"] != protocolVersion {
+		t.Errorf("protocolVersion = %v, want %s", res["protocolVersion"], protocolVersion)
+	}
+	// A server/discover NOTIFICATION (no id) gets no answer at all.
+	if n := drive(t, previewOnlyToolset(), `{"jsonrpc":"2.0","method":"server/discover"}`); len(n) != 0 {
+		t.Errorf("a server/discover notification must not be answered: %v", n)
+	}
+}
+
+// GROWTH 10-21 MCP-2. Every service origin has an env override, so a running
+// binary — not only a test toolset — can be pointed at a stub. The recalls
+// service shipped in 0.1.8 without one.
+func TestEveryServiceOriginHasAnEnvOverride(t *testing.T) {
+	t.Setenv("SCALPMCP_FEED_URL", "http://feed.test/")
+	t.Setenv("SCALPMCP_FUEL_URL", "http://fuel.test")
+	t.Setenv("SCALPMCP_AIR_URL", "http://air.test/")
+	t.Setenv("SCALPMCP_BORDER_URL", "http://border.test")
+	t.Setenv("SCALPMCP_RECALL_URL", "http://recall.test/")
+	got := endpointsFromEnv()
+	want := endpoints{Feed: "http://feed.test", Fuel: "http://fuel.test", Air: "http://air.test", Border: "http://border.test", Recall: "http://recall.test"}
+	if got != want {
+		t.Errorf("endpointsFromEnv() = %+v, want %+v", got, want)
+	}
+	// And the override is what the recalls tool actually buys from.
+	ts := newToolset(&client.Client{}, got)
+	u, err := ts.byName["product_recalls"].BuildURL(map[string]any{"product": "widget"})
+	if err != nil || !strings.HasPrefix(u, "http://recall.test/recalls?") {
+		t.Errorf("product_recalls URL = %q (err %v), want it under the override", u, err)
+	}
+	// With nothing set, the defaults stand.
+	for _, name := range []string{"SCALPMCP_FEED_URL", "SCALPMCP_FUEL_URL", "SCALPMCP_AIR_URL", "SCALPMCP_BORDER_URL", "SCALPMCP_RECALL_URL"} {
+		t.Setenv(name, "")
+	}
+	if d := endpointsFromEnv(); d != defaultEndpoints() {
+		t.Errorf("with no overrides endpointsFromEnv() = %+v, want the defaults", d)
 	}
 }
 

@@ -2,7 +2,7 @@
 
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/dv1-321/scalpstream-mcp)
 
-Pay-per-call MCP server for Claude Desktop, Claude Code, Cursor and any MCP client: air quality (AQI), US border wait times, cheapest fuel prices, US product recalls, and options, crypto, dividend and DeFi-yield research, settled in USDC over x402 on Base.
+Pay-per-call MCP server for Claude Desktop, Claude Code, Cursor and any MCP client: US product recalls, US border wait times, cheapest fuel prices, air quality (AQI), and options, crypto and municipal-income research, settled in USDC over x402 on Base.
 
 An MCP server that buys small, factual datasets at call time with your own
 wallet, over [x402](https://x402.org) — roughly **$0.01 a call**, no account, no
@@ -21,25 +21,79 @@ you would be buying before deciding to buy it.
 
 | Tool | What you get |
 |---|---|
-| `options_research` | Ranked short-term US equity options candidates with the observed metrics behind each ranking. Impersonal research data — no trade plan, sizing, or verdict. |
-| `municipal_income` | Federally tax-exempt municipal bond funds and muni CEFs, with tax-equivalent yields for the 24/32/37% brackets. |
-| `crypto_research` | Ranked cryptocurrency candidates: technical signals plus a Fear & Greed and news-sentiment overlay. |
-| `crypto_yields` | Where to earn interest on crypto: DeFi staking APY, stablecoin lending, liquidity-pool yields across CeFi and DeFi, risk-adjusted by TVL. |
+| `product_recalls` | Active US recalls for a product, brand, ingredient or vehicle across FDA, NHTSA and CPSC in one query, with severity normalised onto one scale, the hazard, the remedy, and the lot numbers that tell whether a specific unit is affected. |
+| `border_crossings` | US ports of entry ranked by **all-in** time — drive plus current CBP wait — per lane type. The nearest crossing is often not the fastest. |
 | `cheapest_fuel` | Cheapest fuel by location and grade. Station-level for Spain, France, Italy; official regional averages for the US. |
 | `air_quality` | Current AQI and pollutants anywhere in the world, an EPA-based verdict on exercising outdoors, and the cleanest window ahead. |
-| `border_crossings` | US ports of entry ranked by **all-in** time — drive plus current CBP wait — per lane type. The nearest crossing is often not the fastest. |
-| `product_recalls` | Active US recalls for a product, brand, ingredient or vehicle across FDA, NHTSA and CPSC in one query, with severity normalised onto one scale, the hazard, the remedy, and the lot numbers that tell whether a specific unit is affected. |
+| `options_research` | Ranked short-term US equity options candidates with the observed metrics behind each ranking. Impersonal research data — no trade plan, sizing, or verdict. |
+| `municipal_income` | Federally tax-exempt municipal bond funds and muni CEFs, with tax-equivalent yields for the 24/32/37% brackets. |
+| `crypto_research` | Ranked cryptocurrency candidates: technical readings plus a Fear & Greed and news-sentiment overlay. |
 | `payment_status` | What's configured, what's been spent. Makes no network call and costs nothing. |
 
+Withdrawn tools are listed under [Versions](#versions).
+
 ## Install
+
+### Docker (no toolchain needed)
+
+The published image is `ghcr.io/dv1-321/scalpstream-mcp`. It runs as a
+non-root user on a shell-less base and speaks MCP over stdin/stdout, so it needs
+`-i` and nothing else:
+
+```bash
+docker run -i --rm ghcr.io/dv1-321/scalpstream-mcp:latest
+```
+
+Claude Desktop (`claude_desktop_config.json`) or any MCP client that takes a
+command, preview-only:
+
+```json
+{
+  "mcpServers": {
+    "scalpstream": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "ghcr.io/dv1-321/scalpstream-mcp:latest"]
+    }
+  }
+}
+```
+
+Claude Code:
+
+```bash
+claude mcp add scalpstream -- docker run -i --rm ghcr.io/dv1-321/scalpstream-mcp:latest
+```
+
+To enable paid calls, put the key in the client's `env` block and forward it
+with a bare `-e NAME` — the name only, so the value never appears in the
+command line:
+
+```json
+{
+  "mcpServers": {
+    "scalpstream": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "-e", "EVM_BASE_PRIVATE_KEY", "-e", "SCALPMCP_BUDGET_USD",
+               "ghcr.io/dv1-321/scalpstream-mcp:latest"],
+      "env": {
+        "EVM_BASE_PRIVATE_KEY": "0x...",
+        "SCALPMCP_BUDGET_USD": "2.00"
+      }
+    }
+  }
+}
+```
+
+Each release is also tagged (`:v0.1.9` and so on) for installs that want to pin
+one; the MCP registry entry pins the exact tag.
+
+### Go
 
 ```bash
 go install github.com/DV1-321/scalpstream-mcp/cmd/scalpmcp@latest
 ```
 
-## Configure
-
-Claude Desktop (`claude_desktop_config.json`), Claude Code, or any MCP client:
+This puts `scalpmcp` in `$(go env GOPATH)/bin`:
 
 ```json
 {
@@ -58,11 +112,80 @@ Claude Desktop (`claude_desktop_config.json`), Claude Code, or any MCP client:
 
 Omit `env` entirely to run in preview-only mode.
 
+## Configure
+
 | Variable | Default | Meaning |
 |---|---|---|
 | `EVM_BASE_PRIVATE_KEY` | *(unset)* | Base-mainnet key holding a little USDC. Unset = preview-only. |
 | `SCALPMCP_MAX_PRICE_USD` | `0.10` | Refuse any single call quoted above this. |
 | `SCALPMCP_BUDGET_USD` | `2.00` | Refuse once the process has spent this much in total. |
+| `SCALPMCP_FEED_URL`, `_FUEL_URL`, `_AIR_URL`, `_BORDER_URL`, `_RECALL_URL` | the live services | Override a service origin, for testing against a stub. |
+
+## Paying without a crypto wallet
+
+The same data runs as Apify Actors, billed to your Apify plan instead of a
+wallet. Apify's hosted MCP server exposes any Actor as a tool, so an MCP client
+that cannot hold a key can reach the same lookups through it with an Apify
+account:
+
+| Data | Apify MCP link |
+|---|---|
+| Fuel prices | <https://mcp.apify.com?tools=rolescout/fuelscout-cheapest-fuel-prices> |
+| US border waits | <https://mcp.apify.com?tools=rolescout/borderscout-us-border-wait-times> |
+| US product recalls | <https://mcp.apify.com?tools=rolescout/recallscout-us-product-recalls> |
+| Stock and crypto screener | <https://mcp.apify.com?tools=rolescout/tradescout-stock-crypto-screener> |
+
+Those links authenticate with your Apify account; this server has no part in
+them and never needs your Apify token.
+
+## Preview mode examples
+
+Captured from the image running with no key. `payment_status` is local:
+
+```json
+{
+  "paid": false,
+  "complete": true,
+  "source": "local",
+  "data": {
+    "paid_mode_enabled": false,
+    "paid_calls": 0,
+    "spent_atomic_usdc": "0",
+    "price_per_call": "$0.01 USDC",
+    "rails": ["USDC on Base (used by this client)", "USDC on Arbitrum", "USDC on Polygon", "XRP on XRPL", "RLUSD on XRPL"],
+    "custody": "The seller holds no keys. This client signs with your own Base key, held only in memory for the process lifetime.",
+    "how_to_enable": "Ask the user to add EVM_BASE_PRIVATE_KEY ... to the MCP server's environment ... Never request, accept or echo the key in chat. ..."
+  }
+}
+```
+
+`product_recalls` with `{"product": "infant formula"}` and no key comes back
+with `paid: false, complete: false`, the service's free preview under `data`,
+and the quote under `price` — that is the designed outcome, not an error:
+
+```json
+{
+  "paid": false,
+  "complete": false,
+  "source": "https://recallscout.scalpstream.com/preview",
+  "reason": "no spending key configured (set EVM_BASE_PRIVATE_KEY in the MCP server's environment to enable paid calls)",
+  "price": { "network": "eip155:8453", "amount_usd": "0.0100", "amount_atomic": "10000", "asset": "0x8335...2913", "pay_to": "0x..." },
+  "note": "This is the FREE PREVIEW, not the paid dataset. The paid call returns the full result described by this tool.",
+  "howto": "Ask the user to add EVM_BASE_PRIVATE_KEY ... Never request, accept or echo the key in chat. ...",
+  "data": {
+    "service": "RecallScout",
+    "what": "Machine-payable US recall lookups across three regulators at once: FDA (food, drugs, medical devices), NHTSA (vehicles) and CPSC (consumer products). ...",
+    "parameters": { "product": "product, brand or ingredient — matched as a phrase across FDA and CPSC", "make": "...", "model": "...", "year": "...", "include_ended": "...", "limit": "..." },
+    "honesty": "If an agency cannot be reached the response says so in sources_failed and sets complete=false. A lookup that could not consult all three is never reported as an all-clear.",
+    "source": "US FDA (openFDA enforcement), US NHTSA (vehicle safety recalls), US CPSC (saferproducts.gov). Public domain / US Government works.",
+    "disclaimer": "..."
+  }
+}
+```
+
+With a key the same call returns `paid: true, complete: true` and the recall
+list under `data`. Every tool uses this one envelope; `complete` is the field
+to branch on.
 
 ## Spending safety
 
@@ -78,7 +201,8 @@ Real money moves, so the design refuses rather than overspends:
 - **Gas is sponsored by the facilitator**, so the wallet needs USDC and no ETH.
 
 Use a throwaway key funded with a dollar or two. Never one holding balances you
-care about.
+care about, and never hand it to a hosted service — this server is the only
+thing that should hold it, and it holds it only in memory.
 
 ## Identification, rate limits and logging
 
@@ -99,6 +223,13 @@ the elapsed milliseconds, for example
 `scalpmcp: call tool=air_quality paid=true complete=true status=200 ms=412 error=false`.
 It never logs argument values, the spending key, or the payment payload.
 
+## Protocol
+
+MCP `2025-06-18` over stdio. A client that opens with the `2026-07-28`
+`server/discover` call gets JSON-RPC `-32601` (method not found), which is that
+revision's signal to fall back to `initialize`; the server then negotiates
+`2025-06-18`.
+
 ## Payment rails
 
 Sellers accept USDC on Base, Arbitrum and Polygon, and XRP or RLUSD on the XRP
@@ -115,7 +246,17 @@ disclaimer and source attribution; read them.
 
 ## Versions
 
-Releases are the Git tags on this repository (`v0.1.7` is current); each one is published to the MCP registry as `io.github.DV1-321/scalpstream-mcp` and as the `ghcr.io/dv1-321/scalpstream-mcp` image. See the [tags](https://github.com/DV1-321/scalpstream-mcp/tags).
+Releases are the [Git tags](https://github.com/DV1-321/scalpstream-mcp/tags) on
+this repository; each one is published to the MCP registry as
+`io.github.DV1-321/scalpstream-mcp` and as the
+[`ghcr.io/dv1-321/scalpstream-mcp`](https://github.com/DV1-321/scalpstream-mcp/pkgs/container/scalpstream-mcp)
+image. [CHANGELOG.md](CHANGELOG.md) has the details per release.
+
+**Withdrawn in 0.1.10: `crypto_yields`** (data licence). The feed endpoint
+behind it (`/yields`) is being taken down, so a 0.1.9 or older server that calls
+the tool will get a 404 from the service rather than data; upgrade to 0.1.10 or
+later, where the tool is no longer listed. No money is taken for a 404 — payment
+settles only when the resource is served.
 
 ## License
 
