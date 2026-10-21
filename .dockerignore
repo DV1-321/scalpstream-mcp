@@ -8,6 +8,11 @@ LICENSE
 server.json
 Dockerfile
 .dockerignore
+# Gallery packaging: a Gemini CLI extension, a Claude Code plugin, an Agent
+# Skill. None of it compiles into the binary.
+gemini-extension.json
+.claude-plugin
+skills
 
 # Never ship a local environment file into an image, even though none is tracked
 # here — the whole point is that this failure mode stays impossible.

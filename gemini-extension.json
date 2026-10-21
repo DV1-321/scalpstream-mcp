@@ -1,0 +1,11 @@
+{
+  "name": "scalpstream",
+  "version": "0.1.9",
+  "contextFileName": "GEMINI.md",
+  "mcpServers": {
+    "scalpstream": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "ghcr.io/dv1-321/scalpstream-mcp:v0.1.9"]
+    }
+  }
+}

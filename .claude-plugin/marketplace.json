@@ -1,0 +1,29 @@
+{
+  "name": "scalpstream-mcp",
+  "owner": {
+    "name": "DV1-321",
+    "url": "https://github.com/DV1-321"
+  },
+  "metadata": {
+    "description": "ScalpStream's own marketplace: one plugin that adds the pay-per-call ScalpStream data MCP server to Claude Code.",
+    "version": "0.1.9"
+  },
+  "plugins": [
+    {
+      "name": "scalpstream",
+      "source": "./",
+      "description": "Pay-per-call US product recalls, US border wait times and cheapest fuel prices over x402. Runs the published Docker image; preview-only until the user configures a throwaway wallet.",
+      "version": "0.1.9",
+      "author": {
+        "name": "DV1-321",
+        "url": "https://github.com/DV1-321"
+      },
+      "homepage": "https://github.com/DV1-321/scalpstream-mcp",
+      "repository": "https://github.com/DV1-321/scalpstream-mcp",
+      "license": "MIT",
+      "keywords": ["mcp", "x402", "recalls", "border-wait-times", "fuel-prices", "data"],
+      "category": "data",
+      "strict": true
+    }
+  ]
+}

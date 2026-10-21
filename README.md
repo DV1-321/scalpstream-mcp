@@ -87,6 +87,23 @@ command line:
 Each release is also tagged (`:v0.1.9` and so on) for installs that want to pin
 one; the MCP registry entry pins the exact tag.
 
+Claude Code can also take it as a plugin, which installs the same Docker
+command with no secrets and bundles the `scalpstream-data` skill:
+
+```text
+/plugin marketplace add DV1-321/scalpstream-mcp
+/plugin install scalpstream@scalpstream-mcp
+```
+
+Gemini CLI reads the `gemini-extension.json` at the root of this repository:
+
+```bash
+gemini extensions install https://github.com/DV1-321/scalpstream-mcp
+```
+
+Both pin the release tag and start preview-only. To pay, add the key to the
+installed server's `env` as described above; never to the manifest.
+
 ### Go
 
 ```bash

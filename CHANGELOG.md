@@ -16,6 +16,19 @@ registry as `io.github.DV1-321/scalpstream-mcp` and as the
   charged for it, because payment settles only when the resource is served.
   Upgrade to 0.1.10 or later.
 
+### Added
+
+- Packaging for galleries that index the repository: a Gemini CLI extension
+  (`gemini-extension.json` + `GEMINI.md`), a Claude Code plugin with its own
+  one-plugin marketplace (`.claude-plugin/`, so
+  `/plugin marketplace add DV1-321/scalpstream-mcp` then
+  `/plugin install scalpstream@scalpstream-mcp` works), and an Agent Skill
+  (`skills/scalpstream-data/SKILL.md`) covering RecallScout, BorderScout and
+  FuelScout: the free A2A calls, the paid GET routes, the refusal codes and
+  the spending rules. All three run the same `docker run -i --rm` command as
+  the README, carry no secrets, and are tied to `server.json`'s version by
+  `TestGeminiExtensionMatchesServerJSON` and `TestClaudePluginMatchesServerJSON`.
+
 ### Changed
 
 - `initialize` instructions name every remaining domain, including US product
