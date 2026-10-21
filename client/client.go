@@ -100,6 +100,16 @@ type Client struct {
 	// The wallet must hold the asset ON that chain; balances do not travel.
 	PreferChainID int64
 
+	// UserAgent is sent as the User-Agent header on EVERY request — the unpaid
+	// GET and the paid retry alike. Empty leaves Go's default ("Go-http-client/1.1"),
+	// which is indistinguishable from crawler traffic in a seller's logs: with no
+	// identifying agent, MCP installs could not be told apart from scrapers, so
+	// the channel could not be judged at all. It carries the program and version
+	// only, never anything about the user. The sellers' edge applies a
+	// per-User-Agent rate limit, so every install sharing one agent string
+	// shares that limit.
+	UserAgent string
+
 	mu    sync.Mutex
 	spent big.Int // settled: the resource came back
 	held  big.Int // in flight, or paid without a confirmed delivery
@@ -178,40 +188,61 @@ func (c *Client) Fetch(ctx context.Context, url string) ([]byte, error) {
 // server answered 200 to the unpaid request: nothing moved, and a caller must
 // not tell anyone it did.
 func (c *Client) FetchPaid(ctx context.Context, url string) (body []byte, paid bool, err error) {
+	r, err := c.FetchResponse(ctx, url)
+	return r.Body, r.Paid, err
+}
+
+// Response is the outcome of one fetch. Status is the last HTTP status the
+// server answered with — 200 for a delivered resource, 402 for a payment the
+// client refused to make, the failing code when a request was answered with
+// anything else — or 0 when no response arrived at all. It is reported so a
+// caller can log what happened without the error text, which carries the URL
+// and with it the query arguments.
+type Response struct {
+	Body   []byte
+	Paid   bool
+	Status int
+}
+
+// FetchResponse is FetchPaid, also reporting the last HTTP status seen. The
+// error contract is FetchPaid's: Status is meaningful on both the success and
+// the failure path.
+func (c *Client) FetchResponse(ctx context.Context, url string) (Response, error) {
 	resp, err := c.do(ctx, url, "")
 	if err != nil {
-		return nil, false, err
+		return Response{}, err
 	}
 	body, status := resp.body, resp.status
 	if status == http.StatusOK {
-		return body, false, nil
+		return Response{Body: body, Status: status}, nil
 	}
 	if status != http.StatusPaymentRequired {
-		return nil, false, fmt.Errorf("x402client: %s: HTTP %d: %s", url, status, snippet(body, 300))
+		return Response{Status: status}, fmt.Errorf("x402client: %s: HTTP %d: %s", url, status, snippet(body, 300))
 	}
+	refused := Response{Status: status}
 
 	ch, err := decodeChallenge(resp.header.Get(x402.HeaderPaymentRequiredStd), body)
 	if err != nil {
-		return nil, false, fmt.Errorf("x402client: %s: %w", url, err)
+		return refused, fmt.Errorf("x402client: %s: %w", url, err)
 	}
 	opt, chainID, ok := findEVMOption(ch, c.PreferChainID)
 	if !ok {
-		return nil, false, &ErrPaymentRequired{Resource: url, Reason: "no EVM (eip155) option offered; this client can only pay USDC on an EVM rail"}
+		return refused, &ErrPaymentRequired{Resource: url, Reason: "no EVM (eip155) option offered; this client can only pay USDC on an EVM rail"}
 	}
 	quote := quoteOf(opt)
 
 	if c.Signer == nil {
-		return nil, false, &ErrPaymentRequired{Resource: url, Quote: quote,
+		return refused, &ErrPaymentRequired{Resource: url, Quote: quote,
 			Reason: "no spending key configured (set EVM_BASE_PRIVATE_KEY in the MCP server's environment to enable paid calls)"}
 	}
 
 	amount, ok := new(big.Int).SetString(opt.Amount, 10)
 	if !ok {
-		return nil, false, fmt.Errorf("x402client: %s: unparseable amount %q", url, opt.Amount)
+		return refused, fmt.Errorf("x402client: %s: unparseable amount %q", url, opt.Amount)
 	}
 	// Both limits are checked BEFORE signing, so a refusal costs nothing.
 	if amount.Cmp(c.maxPrice()) > 0 {
-		return nil, false, &ErrPaymentRequired{Resource: url, Quote: quote,
+		return refused, &ErrPaymentRequired{Resource: url, Quote: quote,
 			Reason: fmt.Sprintf("quoted %s exceeds the per-call cap of %s atomic units", opt.Amount, c.maxPrice())}
 	}
 	// RESERVE the spend against the budget, rather than checking and releasing
@@ -219,7 +250,7 @@ func (c *Client) FetchPaid(ctx context.Context, url string) (body []byte, paid b
 	// both pass a budget neither should have passed — harmless while the MCP
 	// server dispatched serially, and an overspend the moment it does not.
 	if err := c.reserve(amount); err != nil {
-		return nil, false, &ErrPaymentRequired{Resource: url, Quote: quote, Reason: err.Error()}
+		return refused, &ErrPaymentRequired{Resource: url, Quote: quote, Reason: err.Error()}
 	}
 	// From here on the reservation must be resolved on every path: settled if
 	// the resource arrives, released if we never presented a payment, or left
@@ -236,7 +267,7 @@ func (c *Client) FetchPaid(ctx context.Context, url string) (body []byte, paid b
 	domain := pay.TokenDomain{Name: name, Version: version, ChainID: chainID, Contract: opt.Asset}
 	exact, err := c.Signer.AuthorizeTransfer(domain, opt.PayTo, opt.Amount, 5*time.Minute)
 	if err != nil {
-		return nil, false, fmt.Errorf("x402client: %s: authorize: %w", url, err)
+		return refused, fmt.Errorf("x402client: %s: authorize: %w", url, err)
 	}
 
 	envelope := map[string]any{
@@ -247,12 +278,12 @@ func (c *Client) FetchPaid(ctx context.Context, url string) (body []byte, paid b
 	}
 	raw, err := json.Marshal(envelope)
 	if err != nil {
-		return nil, false, fmt.Errorf("x402client: encode payment: %w", err)
+		return refused, fmt.Errorf("x402client: encode payment: %w", err)
 	}
 	// A context already dead here has not sent anything: the signed payment
 	// never leaves the process, so the reservation goes back (via the defer).
 	if err := ctx.Err(); err != nil {
-		return nil, false, fmt.Errorf("x402client: %s: cancelled before the paid request was sent: %w", url, err)
+		return refused, fmt.Errorf("x402client: %s: cancelled before the paid request was sent: %w", url, err)
 	}
 	paidResp, err := c.do(ctx, url, base64.StdEncoding.EncodeToString(raw))
 	if err != nil {
@@ -264,7 +295,7 @@ func (c *Client) FetchPaid(ctx context.Context, url string) (body []byte, paid b
 			// Holding it here was a self-inflicted outage: a feed host down for
 			// an hour turned every retry into $0.01 of "unconfirmed" budget
 			// until the whole budget was gone.
-			return nil, false, err
+			return Response{}, err
 		}
 		// Otherwise the payment may have been on the wire. Whether the seller
 		// settled it before the transport failed is unknowable here, so the
@@ -272,7 +303,7 @@ func (c *Client) FetchPaid(ctx context.Context, url string) (body []byte, paid b
 		// budget.
 		c.markUnconfirmed()
 		settled = true
-		return nil, false, err
+		return Response{}, err
 	}
 	if paidResp.status != http.StatusOK {
 		// The money may or may not have moved; say so rather than implying it did
@@ -285,13 +316,13 @@ func (c *Client) FetchPaid(ctx context.Context, url string) (body []byte, paid b
 		// budget counter that never moved.
 		c.markUnconfirmed()
 		settled = true
-		return nil, false, fmt.Errorf("x402client: %s: paid request returned HTTP %d (settlement state unknown, counted against the budget): %s",
+		return Response{Status: paidResp.status}, fmt.Errorf("x402client: %s: paid request returned HTTP %d (settlement state unknown, counted against the budget): %s",
 			url, paidResp.status, snippet(paidResp.body, 300))
 	}
 	// Confirmed: move the reservation into settled spend.
 	c.commit(amount)
 	settled = true
-	return paidResp.body, true, nil
+	return Response{Body: paidResp.body, Paid: true, Status: paidResp.status}, nil
 }
 
 // neverSent reports whether a transport error is one that is CERTAIN to have
@@ -379,6 +410,11 @@ func (c *Client) do(ctx context.Context, url, payment string) (rawResponse, erro
 	}
 	if c.Attestation != "" {
 		req.Header.Set("X-Compliance-Attestation", c.Attestation)
+	}
+	// Set here, in the one place every request is built, so the unpaid GET and
+	// the paid retry can never disagree about who is asking.
+	if c.UserAgent != "" {
+		req.Header.Set("User-Agent", c.UserAgent)
 	}
 	resp, err := c.httpClient().Do(req)
 	if err != nil {

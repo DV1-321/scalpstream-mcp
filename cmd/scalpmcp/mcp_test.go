@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,6 +18,7 @@ import (
 	"time"
 
 	"github.com/DV1-321/scalpstream-mcp/client"
+	"github.com/DV1-321/scalpstream-mcp/pay"
 )
 
 // drive runs a sequence of JSON-RPC lines through the server and returns the
@@ -589,6 +593,123 @@ func TestOversizedMessageDoesNotKillTheSession(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"id":2`) {
 		t.Errorf("the message after an oversized one was not handled; got: %s", out.String())
+	}
+}
+
+// captureLog routes the standard logger into a buffer for one test. main()
+// points it at stderr; tests need to read it.
+func captureLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	prevOut, prevFlags := log.Writer(), log.Flags()
+	log.SetOutput(&buf)
+	log.SetFlags(0)
+	t.Cleanup(func() { log.SetOutput(prevOut); log.SetFlags(prevFlags) })
+	return &buf
+}
+
+// callLine is the exact shape of the per-call log line. Anything that does not
+// match is either a format drift or something leaking into the log.
+var callLine = regexp.MustCompile(`^call tool=([A-Za-z_<>]+) paid=(true|false) complete=(true|false) status=(\d+) ms=(\d+) error=(true|false)$`)
+
+// GROWTH 10-21 MCP-1. One stderr line per tool call — tool, paid, complete, HTTP
+// status, milliseconds — and NEVER an argument value, the key, or the payment
+// payload. stderr is captured by MCP hosts into files nobody reviews, so a
+// user's coordinates, a product name, or a signed transfer must not land there.
+func TestEveryToolCallLogsOneLineWithoutArgumentValues(t *testing.T) {
+	// testKey was generated for the client package's tests and has never been
+	// used on any network. It must never be funded.
+	const testKey = "0xcc20f897f3181022d04694efab0c83f1697b2a1e0da3359ec25f27cce9c1ccd2"
+	signer, err := pay.NewSigner(testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payloads []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasPrefix(r.URL.Path, "/preview") {
+			_, _ = w.Write([]byte(`{"free":true}`))
+			return
+		}
+		if p := r.Header.Get("PAYMENT-SIGNATURE"); p != "" {
+			payloads = append(payloads, p)
+			_, _ = w.Write([]byte(`{"aqi":42}`))
+			return
+		}
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"x402Version":2,"accepts":[{"scheme":"exact","network":"eip155:8453","amount":"10000",` +
+			`"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","payTo":"0x1111111111111111111111111111111111111111",` +
+			`"extra":{"name":"USD Coin","version":"2"}}]}`))
+	}))
+	defer srv.Close()
+	eps := endpoints{Feed: srv.URL, Fuel: srv.URL, Air: srv.URL, Border: srv.URL, Recall: srv.URL}
+
+	// Distinctive argument values: if any of them shows up in the log, the
+	// log is carrying the user's query.
+	const args = `{"lat":47.65881,"lon":-117.42601,"place":"SECRETPLACE","hours":48}`
+	secrets := []string{"47.65881", "117.42601", "SECRETPLACE", "hours", srv.URL, testKey, strings.TrimPrefix(testKey, "0x")}
+
+	type step struct {
+		name, args             string
+		wantTool               string
+		wantPaid, wantComplete bool
+		wantStatus             int
+		wantErr                bool
+		ts                     *toolset
+	}
+	paidTS := newToolset(&client.Client{Signer: signer}, eps)
+	previewTS := newToolset(&client.Client{}, eps)
+	steps := []step{
+		{"air_quality", args, "air_quality", true, true, 200, false, paidTS},
+		{"air_quality", args, "air_quality", false, false, 402, false, previewTS},
+		{"payment_status", `{}`, "payment_status", false, true, 0, false, previewTS},
+		{"air_quality", `{"lat":"SECRETPLACE","lon":0}`, "air_quality", false, false, 0, true, previewTS},
+		{"no_such_tool", args, "<unknown>", false, false, 0, true, previewTS},
+	}
+	for _, s := range steps {
+		buf := captureLog(t)
+		_, _, err := s.ts.call(context.Background(), s.name, json.RawMessage(s.args))
+		if (err != nil) != s.wantErr {
+			t.Fatalf("%s(%s): err=%v, wantErr=%v", s.name, s.args, err, s.wantErr)
+		}
+		lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+		if len(lines) != 1 {
+			t.Fatalf("%s: logged %d lines, want exactly 1: %q", s.name, len(lines), buf.String())
+		}
+		m := callLine.FindStringSubmatch(lines[0])
+		if m == nil {
+			t.Fatalf("%s: log line %q does not match the call format", s.name, lines[0])
+		}
+		got := fmt.Sprintf("tool=%s paid=%s complete=%s status=%s error=%s", m[1], m[2], m[3], m[4], m[6])
+		want := fmt.Sprintf("tool=%s paid=%t complete=%t status=%d error=%t", s.wantTool, s.wantPaid, s.wantComplete, s.wantStatus, s.wantErr)
+		if got != want {
+			t.Errorf("%s(%s): logged %q, want %q", s.name, s.args, got, want)
+		}
+		for _, secret := range secrets {
+			if strings.Contains(buf.String(), secret) {
+				t.Errorf("%s: log line carries %q: %q", s.name, secret, buf.String())
+			}
+		}
+		for _, p := range payloads {
+			if p != "" && strings.Contains(buf.String(), p) {
+				t.Errorf("%s: log line carries the payment payload", s.name)
+			}
+		}
+	}
+	if len(payloads) != 1 {
+		t.Fatalf("the paid step should have presented exactly one payment, saw %d", len(payloads))
+	}
+}
+
+// The User-Agent names the program, the version that serverInfo reports, and
+// where to read about it — and nothing about the user.
+func TestUserAgentNamesProgramAndVersion(t *testing.T) {
+	want := "scalpmcp/" + buildVersion + " (+https://github.com/DV1-321/scalpstream-mcp)"
+	if got := userAgent(); got != want {
+		t.Errorf("userAgent() = %q, want %q", got, want)
+	}
+	if !regexp.MustCompile(`^scalpmcp/\d+\.\d+\.\d+ \(\+https://[^)]+\)$`).MatchString(userAgent()) {
+		t.Errorf("userAgent() = %q does not follow product/version (+url)", userAgent())
 	}
 }
 

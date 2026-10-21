@@ -62,6 +62,17 @@ import (
 // disagrees with this file.
 var buildVersion = "0.1.9"
 
+// userAgent identifies this program on every outbound request. Without it the
+// Go default ("Go-http-client/1.1") made MCP installs indistinguishable from
+// crawler traffic in the sellers' logs — no Go client appeared among the top
+// User-Agent families at all — so the MCP channel could not be measured. It
+// names the program and its version and nothing else; it carries no user data.
+// The "+URL" convention is the one well-behaved bots use to say where a
+// server operator can read about the client.
+func userAgent() string {
+	return "scalpmcp/" + buildVersion + " (+https://github.com/DV1-321/scalpstream-mcp)"
+}
+
 func main() {
 	// STDOUT BELONGS TO THE PROTOCOL. The MCP stdio transport reads JSON-RPC
 	// from this process's stdout, so a single stray line there — a log message,
@@ -78,6 +89,7 @@ func main() {
 		Attestation:    "not-sanctioned-party",
 		MaxPriceAtomic: usdEnv("SCALPMCP_MAX_PRICE_USD", client.DefaultMaxPrice),
 		Budget:         usdEnv("SCALPMCP_BUDGET_USD", client.DefaultBudget),
+		UserAgent:      userAgent(),
 	}
 
 	if key := strings.TrimSpace(os.Getenv("EVM_BASE_PRIVATE_KEY")); key != "" {

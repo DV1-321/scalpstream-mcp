@@ -484,6 +484,90 @@ func (s *cancellingTransport) RoundTrip(r *http.Request) (*http.Response, error)
 		Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 }
 
+// GROWTH 10-21 MCP-1. Every request must identify the program: the unpaid GET
+// and the paid retry alike. With no User-Agent the sellers' logs could not tell
+// an MCP install from a crawler, so the channel could not be measured at all.
+// The two requests are built in one place, and this pins that they agree.
+func TestUserAgentIsSentOnUnpaidGetAndPaidRetry(t *testing.T) {
+	const ua = "scalpmcp/9.9.9 (+https://example.invalid/scalpmcp)"
+	var seen []string
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.Header.Get("User-Agent"))
+		mu.Unlock()
+		if r.Header.Get("PAYMENT-SIGNATURE") != "" {
+			_, _ = w.Write([]byte(`{"data":"the goods"}`))
+			return
+		}
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"x402Version":2,"accepts":[{"scheme":"exact","network":"eip155:8453","amount":"10000",` +
+			`"asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","payTo":"0x1111111111111111111111111111111111111111",` +
+			`"extra":{"name":"USD Coin","version":"2"}}]}`))
+	}))
+	defer srv.Close()
+
+	c := &client.Client{Signer: testSigner(t), UserAgent: ua}
+	r, err := c.FetchResponse(context.Background(), srv.URL)
+	if err != nil || !r.Paid || r.Status != http.StatusOK {
+		t.Fatalf("paid fetch: paid=%v status=%d err=%v", r.Paid, r.Status, err)
+	}
+	if len(seen) != 2 {
+		t.Fatalf("server saw %d requests, want the unpaid GET and the paid retry", len(seen))
+	}
+	for i, got := range seen {
+		if got != ua {
+			t.Errorf("request %d User-Agent = %q, want %q", i, got, ua)
+		}
+	}
+
+	// An unset UserAgent keeps Go's default rather than sending an empty header.
+	seen = nil
+	plain := &client.Client{Signer: testSigner(t)}
+	if _, err := plain.Fetch(context.Background(), srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	for i, got := range seen {
+		if !strings.HasPrefix(got, "Go-http-client/") {
+			t.Errorf("request %d with no UserAgent set sent %q; want Go's default", i, got)
+		}
+	}
+}
+
+// FetchResponse reports the last HTTP status on every path, so the MCP server
+// can log what happened without the error text (which carries the URL and its
+// arguments).
+func TestFetchResponseReportsStatusOnEveryPath(t *testing.T) {
+	free := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"free":true}`))
+	}))
+	defer free.Close()
+	if r, err := (&client.Client{}).FetchResponse(context.Background(), free.URL); err != nil || r.Paid || r.Status != 200 {
+		t.Errorf("free 200: paid=%v status=%d err=%v", r.Paid, r.Status, err)
+	}
+
+	gated, _ := challengeServer(t, "10000")
+	r, err := (&client.Client{}).FetchResponse(context.Background(), gated.URL)
+	var pay *client.ErrPaymentRequired
+	if !errors.As(err, &pay) || r.Status != http.StatusPaymentRequired {
+		t.Errorf("refused: status=%d err=%v; want 402 and ErrPaymentRequired", r.Status, err)
+	}
+
+	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "down", http.StatusBadGateway)
+	}))
+	defer broken.Close()
+	if r, err := (&client.Client{}).FetchResponse(context.Background(), broken.URL); err == nil || r.Status != http.StatusBadGateway {
+		t.Errorf("502: status=%d err=%v; want 502 and an error", r.Status, err)
+	}
+
+	rt := &scriptedTransport{paidErr: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("refused")}}
+	c := &client.Client{Signer: testSigner(t), HTTP: &http.Client{Transport: rt}}
+	if r, err := c.FetchResponse(context.Background(), "http://feed.invalid/picks"); err == nil || r.Status != 0 {
+		t.Errorf("transport failure: status=%d err=%v; want 0 and an error", r.Status, err)
+	}
+}
+
 // A call the client REFUSED must not leave money reserved, or a budget bleeds
 // away on requests that never happened.
 func TestRefusedCallReleasesItsReservation(t *testing.T) {

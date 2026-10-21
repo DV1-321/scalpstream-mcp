@@ -80,6 +80,25 @@ Real money moves, so the design refuses rather than overspends:
 Use a throwaway key funded with a dollar or two. Never one holding balances you
 care about.
 
+## Identification, rate limits and logging
+
+Every request this server makes carries the header
+`User-Agent: scalpmcp/<version> (+https://github.com/DV1-321/scalpstream-mcp)`,
+on the unpaid request and on the paid retry alike. It names the program and its
+version and nothing about you.
+
+Each ScalpStream host applies an edge rate limit of **60 requests per minute per
+User-Agent**, and every install of this server presents the same User-Agent, so
+all installs share that allowance on each host. At one request per tool call
+this is far above normal agent use; a 429 means the shared allowance is busy for
+the rest of that minute, not that your key or budget is at fault.
+
+The server writes one line to **stderr** per tool call — the tool name, whether
+it paid, whether the result was complete or a preview, the last HTTP status and
+the elapsed milliseconds, for example
+`scalpmcp: call tool=air_quality paid=true complete=true status=200 ms=412 error=false`.
+It never logs argument values, the spending key, or the payment payload.
+
 ## Payment rails
 
 Sellers accept USDC on Base, Arbitrum and Polygon, and XRP or RLUSD on the XRP

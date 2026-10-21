@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/url"
 	"sort"
 	"strconv"
@@ -132,10 +133,45 @@ const callTimeout = 170 * time.Second
 // that validates against the tool's outputSchema — the two are the same value,
 // rendered twice, so they can never disagree.
 func (ts *toolset) call(ctx context.Context, name string, rawArgs json.RawMessage) (string, map[string]any, error) {
+	start := time.Now()
+	rec := callRecord{tool: "<unknown>"}
+	text, structured, err := ts.dispatch(ctx, name, rawArgs, &rec)
+	rec.failed = err != nil
+	log.Print(rec.line(time.Since(start)))
+	return text, structured, err
+}
+
+// callRecord is what one tool call leaves in the stderr log: the tool, whether
+// it paid, whether the result was the complete dataset or a preview, the last
+// HTTP status seen, and how long it took.
+//
+// It is the only per-call trace this server writes, and it is deliberately
+// narrow. Argument values are never logged, because they are the user's
+// query — coordinates, a product, a state — and stderr is routinely captured
+// by MCP hosts into files the user never reviews. Error text is never logged
+// either: the client's errors name the URL, and the URL carries the arguments.
+// The spending key and the signed payment never come near this path at all.
+type callRecord struct {
+	tool     string
+	paid     bool
+	complete bool
+	status   int
+	failed   bool
+}
+
+func (r callRecord) line(d time.Duration) string {
+	return fmt.Sprintf("call tool=%s paid=%t complete=%t status=%d ms=%d error=%t",
+		r.tool, r.paid, r.complete, r.status, d.Milliseconds(), r.failed)
+}
+
+// dispatch is call without the log line; rec is filled in as the outcome
+// becomes known so the one log line can be written on every exit path.
+func (ts *toolset) dispatch(ctx context.Context, name string, rawArgs json.RawMessage, rec *callRecord) (string, map[string]any, error) {
 	t, ok := ts.byName[name]
 	if !ok {
 		return "", nil, fmt.Errorf("unknown tool %q; call tools/list for the available set", name)
 	}
+	rec.tool = t.Name
 	args := map[string]any{}
 	if len(rawArgs) > 0 {
 		if err := json.Unmarshal(rawArgs, &args); err != nil {
@@ -143,6 +179,7 @@ func (ts *toolset) call(ctx context.Context, name string, rawArgs json.RawMessag
 		}
 	}
 	if t.BuildURL == nil { // local tool, no network
+		rec.complete = true
 		return render(ts.status())
 	}
 	target, err := t.BuildURL(args)
@@ -150,8 +187,11 @@ func (ts *toolset) call(ctx context.Context, name string, rawArgs json.RawMessag
 		return "", nil, err
 	}
 
-	body, paid, err := ts.client.FetchPaid(ctx, target)
+	resp, err := ts.client.FetchResponse(ctx, target)
+	rec.status = resp.Status
 	if err == nil {
+		paid, body := resp.Paid, resp.Body
+		rec.paid, rec.complete = paid, true
 		out := map[string]any{
 			"paid":     paid,
 			"source":   target,
