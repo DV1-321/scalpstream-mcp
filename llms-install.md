@@ -11,10 +11,10 @@ air quality, and market research — for about $0.01 a call. There is no account
 to create and no API key to obtain.
 
 The tools are `product_recalls`, `border_crossings`, `cheapest_fuel`,
-`air_quality`, `options_research`, `municipal_income`, `crypto_research` and the
-local `payment_status`. `crypto_yields` was withdrawn in 0.1.10 (data licence):
-if a listing or an older install still shows it, do not call it — the service
-behind it returns 404.
+`air_quality`, `options_research`, `municipal_income` and the local
+`payment_status`. `crypto_yields` and `crypto_research` were withdrawn in 0.1.10
+(data licence): if a listing or an older install still shows either, do not
+call it — the service behind it returns 404.
 
 **Install it without a wallet first.** The server is fully functional in
 preview-only mode: every paid tool returns the service's free preview plus the
@@ -148,7 +148,7 @@ Tell the user plainly:
 |---|---|
 | `command not found: scalpmcp` | `$(go env GOPATH)/bin` is not on `PATH`. Use the absolute path in the config. |
 | The container exits immediately | It was started without `-i`, so it got no stdin and read EOF. |
-| A tool named `crypto_yields` returns 404 | Withdrawn in 0.1.10 (data licence). Upgrade the image or binary; nothing was charged. |
+| A tool named `crypto_yields` or `crypto_research` returns 404 | Withdrawn in 0.1.10 (data licence). Upgrade the image or binary; nothing was charged. |
 | Client reports a parse error or drops the connection | Something is writing to stdout. This server writes only JSON-RPC there and all diagnostics to stderr, so suspect a wrapper script. |
 | A paid tool returns `"paid": false` with a price | Expected with no key. Not an error. |
 | `EVM_BASE_PRIVATE_KEY is set but unusable` | The key is not a 32-byte hex value. It fails fast on purpose rather than silently falling back to preview mode. |

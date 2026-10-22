@@ -113,8 +113,8 @@ func TestToolsListShape(t *testing.T) {
 	got := drive(t, previewOnlyToolset(), `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
 	res := got[0]["result"].(map[string]any)
 	tools, _ := res["tools"].([]any)
-	// Exact, not "at least": a withdrawn tool creeping back in — crypto_yields
-	// in 0.1.10, whose feed endpoint is gone — would be a paid 404, and an
+	// Exact, not "at least": a withdrawn tool creeping back in — crypto_yields or
+	// crypto_research in 0.1.10, whose feed boards are gone — would be a paid 404, and an
 	// unlisted new one would be unreachable. Both change this number.
 	if len(tools) != expectedToolCount {
 		t.Fatalf("expected exactly %d tools, got %d", expectedToolCount, len(tools))
@@ -155,16 +155,18 @@ func TestToolsListShape(t *testing.T) {
 	}
 }
 
-// The catalogue as of 0.1.10. crypto_yields was withdrawn in 0.1.10 because its
-// upstream data licence does not permit resale; the feed's /yields endpoint
-// goes away with it, so listing the tool would sell a 404.
+// The catalogue as of 0.1.10. crypto_yields and crypto_research were withdrawn
+// in 0.1.10 because their upstream market-data licences do not permit resale or
+// use by agents; the feed's /yields and /crypto boards go away with them, so
+// listing either tool would sell a 404. The count is a literal, not
+// len(expectedTools), so that editing the list alone cannot move it.
 var (
 	expectedTools = []string{
-		"options_research", "municipal_income", "crypto_research",
+		"options_research", "municipal_income",
 		"cheapest_fuel", "air_quality", "border_crossings", "product_recalls", "payment_status",
 	}
-	expectedToolCount = len(expectedTools)
-	withdrawnTools    = []string{"crypto_yields"}
+	expectedToolCount = 7
+	withdrawnTools    = []string{"crypto_yields", "crypto_research"}
 )
 
 // GROWTH 10-21 MCP-2. The initialize instructions are the catalogue in prose,
@@ -174,23 +176,27 @@ var (
 // domain must be named and no withdrawn one may be.
 func TestInstructionsNameEveryToolDomainAndNothingElse(t *testing.T) {
 	text := strings.ToLower(previewOnlyToolset().instructions())
-	for _, domain := range []string{"options", "municipal", "crypto", "fuel", "air quality", "border", "recalls"} {
+	for _, domain := range []string{"options", "municipal", "fuel", "air quality", "border", "recalls"} {
 		if !strings.Contains(text, domain) {
 			t.Errorf("instructions do not mention %q: %q", domain, text)
 		}
 	}
-	for _, gone := range []string{"yield", "staking"} {
+	for _, gone := range []string{"yield", "staking", "crypto"} {
 		if strings.Contains(text, gone) {
 			t.Errorf("instructions still mention %q, a withdrawn tool: %q", gone, text)
 		}
 	}
-	// No tool refers to the withdrawn feed endpoints either.
+	// No tool refers to the withdrawn feed endpoints either: /yields,
+	// /preview-yields, /crypto and /preview-crypto on the feed origin.
+	withdrawnPath := func(u string) bool {
+		return strings.Contains(u, "yields") || strings.Contains(u, "crypto")
+	}
 	for _, tl := range previewOnlyToolset().tools {
-		if strings.Contains(tl.Preview, "yields") {
+		if withdrawnPath(tl.Preview) {
 			t.Errorf("%s previews from %s, a withdrawn endpoint", tl.Name, tl.Preview)
 		}
 		if tl.BuildURL != nil {
-			if u, err := tl.BuildURL(map[string]any{"country": "US", "region": "CA", "product": "x", "lat": 1, "lon": 1}); err == nil && strings.Contains(u, "yields") {
+			if u, err := tl.BuildURL(map[string]any{"country": "US", "region": "CA", "product": "x", "lat": 1, "lon": 1}); err == nil && withdrawnPath(u) {
 				t.Errorf("%s buys from %s, a withdrawn endpoint", tl.Name, u)
 			}
 		}
