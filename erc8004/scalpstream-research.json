@@ -1,7 +1,7 @@
 {
   "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
   "name": "ScalpStream Research",
-  "description": "Pay-per-call market research feeds for agents: ranked options candidates, dividend and tax-free income, crypto scalp candidates and the best interest-paying cryptos. Free previews on every skill carry a judgeable sample and a board fingerprint (HTTP ETag); the full feed is USDC 0.02 per call over x402 on Base, Arbitrum or Polygon, or XRP/RLUSD on the XRP Ledger, with a signed receipt. A2A 0.3.0 JSON-RPC at https://feed.scalpstream.com/a2a; also an MCP server (scalpstream-mcp) and an Apify actor. Not investment advice.",
+  "description": "Pay-per-call market research feeds for agents: ranked options candidates and dividend and tax-free income. Free previews on every skill carry a judgeable sample and a board fingerprint (HTTP ETag); the full feed is USDC 0.02 per call over x402 on Base, Arbitrum or Polygon, or XRP/RLUSD on the XRP Ledger, with a signed receipt. A2A 0.3.0 JSON-RPC at https://feed.scalpstream.com/a2a; also an MCP server (scalpstream-mcp) and an Apify actor. Not investment advice.",
   "image": "https://feed.scalpstream.com/icon.png",
   "services": [
     { "name": "web", "endpoint": "https://scalpstream.com/" },
