@@ -114,8 +114,8 @@ func TestToolsListShape(t *testing.T) {
 	res := got[0]["result"].(map[string]any)
 	tools, _ := res["tools"].([]any)
 	// Exact, not "at least": a withdrawn tool creeping back in — crypto_yields or
-	// crypto_research in 0.1.10, whose feed boards are gone — would be a paid 404, and an
-	// unlisted new one would be unreachable. Both change this number.
+	// crypto_research in 0.1.10, whose feed boards are gone — would be a dead paid tool
+	// (404/410), and an unlisted new one would be unreachable. Both change this number.
 	if len(tools) != expectedToolCount {
 		t.Fatalf("expected exactly %d tools, got %d", expectedToolCount, len(tools))
 	}
@@ -156,9 +156,9 @@ func TestToolsListShape(t *testing.T) {
 }
 
 // The catalogue as of 0.1.10. crypto_yields and crypto_research were withdrawn
-// in 0.1.10 because their upstream market-data licences do not permit resale or
-// use by agents; the feed's /yields and /crypto boards go away with them, so
-// listing either tool would sell a 404. The count is a literal, not
+// in 0.1.10 over their upstream market-data licences; the feed's /yields (404)
+// and /crypto (410 "withdrawn") boards go away with them, so listing either tool
+// would offer a dead paid tool. The count is a literal, not
 // len(expectedTools), so that editing the list alone cannot move it.
 var (
 	expectedTools = []string{

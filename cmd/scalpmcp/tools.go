@@ -463,11 +463,11 @@ func buildTools(e endpoints) []tool {
 			BuildURL: func(map[string]any) (string, error) { return e.Feed + "/dividends", nil },
 		},
 		// crypto_yields (feed /yields and /preview-yields) and crypto_research
-		// (feed /crypto and /preview-crypto) were withdrawn in 0.1.10: their
-		// upstream market-data licences do not permit resale or use by agents.
-		// The feed takes those boards down too, so a tool pointing at them would
-		// be a paid 404. Withdrawn tools are listed in CHANGELOG.md; do not re-add
-		// one without a licence.
+		// (feed /crypto and /preview-crypto) were withdrawn in 0.1.10 over their
+		// upstream market-data licences. The feed takes those boards down too
+		// (/yields is a 404, /crypto a 410 "withdrawn"), so a tool pointing at
+		// them would be a dead paid tool. Withdrawn tools are listed in
+		// CHANGELOG.md; do not re-add one without a licence.
 		{
 			Name:  "cheapest_fuel",
 			Title: "Cheapest fuel near a location",

@@ -269,11 +269,12 @@ this repository; each one is published to the MCP registry as
 image. [CHANGELOG.md](CHANGELOG.md) has the details per release.
 
 **Withdrawn in 0.1.10: `crypto_yields` and `crypto_research`** (data
-licence). The feed endpoints behind them (`/yields` and `/crypto`) are being
-taken down, so a 0.1.9 or older server that calls either tool will get a 404
-from the service rather than data; upgrade to 0.1.10 or later, where neither
-tool is listed. No money is taken for a 404 — payment settles only when the
-resource is served.
+licence). The feed no longer serves either board: `/yields` answers 404 Not
+Found and `/crypto` answers 410 Gone with `"error": "withdrawn"`, so a 0.1.9
+or older server that calls either tool gets that error rather than data;
+upgrade to 0.1.10 or later, where neither tool is listed. No money is taken
+for either — payment settles only when the resource is served, and the 410 is
+answered before the payment gate.
 
 ## License
 
