@@ -2,7 +2,7 @@
 
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/dv1-321/scalpstream-mcp)
 
-Pay-per-call MCP server for Claude Desktop, Claude Code, Cursor and any MCP client: US product recalls, US border wait times, cheapest fuel prices, air quality (AQI), and options, crypto and municipal-income research, settled in USDC over x402 on Base.
+Pay-per-call MCP server for Claude Desktop, Claude Code, Cursor and any MCP client: US product recalls, US border wait times, cheapest fuel prices, air quality (AQI), and options and municipal-income research, settled in USDC over x402 on Base.
 
 An MCP server that buys small, factual datasets at call time with your own
 wallet, over [x402](https://x402.org) — roughly **$0.01 a call**, no account, no
@@ -27,7 +27,6 @@ you would be buying before deciding to buy it.
 | `air_quality` | Current AQI and pollutants anywhere in the world, an EPA-based verdict on exercising outdoors, and the cleanest window ahead. |
 | `options_research` | Ranked short-term US equity options candidates with the observed metrics behind each ranking. Impersonal research data — no trade plan, sizing, or verdict. |
 | `municipal_income` | Federally tax-exempt municipal bond funds and muni CEFs, with tax-equivalent yields for the 24/32/37% brackets. |
-| `crypto_research` | Ranked cryptocurrency candidates: technical readings plus a Fear & Greed and news-sentiment overlay. |
 | `payment_status` | What's configured, what's been spent. Makes no network call and costs nothing. |
 
 Withdrawn tools are listed under [Versions](#versions).
@@ -150,7 +149,7 @@ account:
 | Fuel prices | <https://mcp.apify.com?tools=rolescout/fuelscout-cheapest-fuel-prices> |
 | US border waits | <https://mcp.apify.com?tools=rolescout/borderscout-us-border-wait-times> |
 | US product recalls | <https://mcp.apify.com?tools=rolescout/recallscout-us-product-recalls> |
-| Stock and crypto screener | <https://mcp.apify.com?tools=rolescout/tradescout-stock-crypto-screener> |
+| Options and municipal-income research | <https://mcp.apify.com?tools=rolescout/tradescout-stock-crypto-screener> |
 
 Those links authenticate with your Apify account; this server has no part in
 them and never needs your Apify token.
@@ -269,11 +268,13 @@ this repository; each one is published to the MCP registry as
 [`ghcr.io/dv1-321/scalpstream-mcp`](https://github.com/DV1-321/scalpstream-mcp/pkgs/container/scalpstream-mcp)
 image. [CHANGELOG.md](CHANGELOG.md) has the details per release.
 
-**Withdrawn in 0.1.10: `crypto_yields`** (data licence). The feed endpoint
-behind it (`/yields`) is being taken down, so a 0.1.9 or older server that calls
-the tool will get a 404 from the service rather than data; upgrade to 0.1.10 or
-later, where the tool is no longer listed. No money is taken for a 404 — payment
-settles only when the resource is served.
+**Withdrawn in 0.1.10: `crypto_yields` and `crypto_research`** (data
+licence). The feed no longer serves either board: `/yields` answers 404 Not
+Found and `/crypto` answers 410 Gone with `"error": "withdrawn"`, so a 0.1.9
+or older server that calls either tool gets that error rather than data;
+upgrade to 0.1.10 or later, where neither tool is listed. No money is taken
+for either — payment settles only when the resource is served, and the 410 is
+answered before the payment gate.
 
 ## License
 

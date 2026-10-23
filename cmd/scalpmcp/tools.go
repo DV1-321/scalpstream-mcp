@@ -106,13 +106,14 @@ func (ts *toolset) instructions() string {
 	}
 	// The domain list is the tool catalogue in prose, and it must stay in step
 	// with buildTools: a domain named here that no tool serves sends a model
-	// looking for a tool that is not there (staking yields, after 0.1.10), and
-	// a tool left out of it is one a model never thinks to call (recalls, before).
-	// TestInstructionsNameEveryToolDomainAndNothingElse pins both directions.
+	// looking for a tool that is not there (staking yields and crypto candidates,
+	// after 0.1.10), and a tool left out of it is one a model never thinks to
+	// call (recalls, before). TestInstructionsNameEveryToolDomainAndNothingElse
+	// pins both directions.
 	return "ScalpStream sells small, factual datasets per request over the x402 payment protocol " +
-		"(HTTP 402): US equity options research, federally tax-exempt municipal income, crypto " +
-		"candidates, cheapest fuel, air quality, US border-crossing wait times and US product " +
-		"recalls. Every tool returns JSON. " + mode
+		"(HTTP 402): US equity options research, federally tax-exempt municipal income, cheapest " +
+		"fuel, air quality, US border-crossing wait times and US product recalls. Every tool " +
+		"returns JSON. " + mode
 }
 
 // howToEnable is returned INTO the model's context whenever a paid call could
@@ -461,21 +462,12 @@ func buildTools(e endpoints) []tool {
 			Output:   envelopeSchema("Ranked municipal bond funds and closed-end funds with current yield, tax-equivalent yields by bracket, distribution frequency and growth streak."),
 			BuildURL: func(map[string]any) (string, error) { return e.Feed + "/dividends", nil },
 		},
-		{
-			Name:  "crypto_research",
-			Title: "Cryptocurrency candidates",
-			Description: "Ranked cryptocurrency candidates using the same technical readings as the equity feed (RSI, ATR, " +
-				"VWAP, momentum) plus a macro overlay from the Fear & Greed index and news sentiment. Impersonal " +
-				"research data, not advice.",
-			Schema:   noArgs,
-			Preview:  e.Feed + "/preview-crypto",
-			Output:   envelopeSchema("Ranked cryptocurrency candidates with technical readings and the macro overlay (Fear & Greed, news sentiment)."),
-			BuildURL: func(map[string]any) (string, error) { return e.Feed + "/crypto", nil },
-		},
-		// crypto_yields (feed /yields and /preview-yields) was withdrawn in 0.1.10:
-		// its upstream data licence does not permit resale. The feed endpoint is
-		// going away too, so a tool pointing at it would be a paid 404. Withdrawn
-		// tools are listed in CHANGELOG.md; do not re-add one without a licence.
+		// crypto_yields (feed /yields and /preview-yields) and crypto_research
+		// (feed /crypto and /preview-crypto) were withdrawn in 0.1.10 over their
+		// upstream market-data licences. The feed takes those boards down too
+		// (/yields is a 404, /crypto a 410 "withdrawn"), so a tool pointing at
+		// them would be a dead paid tool. Withdrawn tools are listed in
+		// CHANGELOG.md; do not re-add one without a licence.
 		{
 			Name:  "cheapest_fuel",
 			Title: "Cheapest fuel near a location",

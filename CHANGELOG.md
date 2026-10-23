@@ -12,9 +12,15 @@ registry as `io.github.DV1-321/scalpstream-mcp` and as the
   lending and liquidity-pool yields does not permit resale, so the tool is
   gone from `tools/list` and the feed's `/yields` and `/preview-yields`
   endpoints are being taken down. A 0.1.9 or older server that still lists the
-  tool will get a **404** from the service when it is called; nothing is
+  tool will get a **404 Not Found** from the service when it is called; nothing is
   charged for it, because payment settles only when the resource is served.
   Upgrade to 0.1.10 or later.
+- **`crypto_research`** (data licence). The cryptocurrency board is withdrawn
+  while its market-data licence is reviewed, so the tool is gone from
+  `tools/list`. The feed's `/crypto` and `/preview-crypto` endpoints answer
+  **410 Gone** with `"error": "withdrawn"` instead of the board, ahead of the
+  payment gate, so a 0.1.9 or older server that still lists the tool gets
+  that 410 and is charged nothing. Upgrade to 0.1.10 or later.
 
 ### Added
 
@@ -33,9 +39,7 @@ registry as `io.github.DV1-321/scalpstream-mcp` and as the
 
 - `initialize` instructions name every remaining domain, including US product
   recalls (the tool shipped in 0.1.8 but was never mentioned), and no longer
-  name staking yields.
-- `crypto_research` describes "technical readings" rather than "technical
-  signals".
+  name staking yields or crypto candidates.
 - `server/discover` (the MCP 2026-07-28 opening call) is answered explicitly
   with JSON-RPC `-32601`, the documented signal for a newer client to fall back
   to `initialize`. The server still speaks 2025-06-18 only.
