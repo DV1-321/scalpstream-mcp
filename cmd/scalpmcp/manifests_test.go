@@ -155,11 +155,11 @@ func TestSkillFrontmatter(t *testing.T) {
 	}
 }
 
-// The packaging must carry no secret and must not point an agent at the
-// financial research tools, which the skill and context file leave out on
-// purpose. A hex run of 64 digits is a private key or a signature; neither
-// belongs in a file a gallery republishes.
-func TestPackagingCarriesNoSecretsAndNoResearchTools(t *testing.T) {
+// The packaging must carry no secret and must not point an agent at a tool the
+// server does not offer: the withdrawn research tools, or air_quality while it
+// is temporarily unavailable. A hex run of 64 digits is a private key or a
+// signature; neither belongs in a file a gallery republishes.
+func TestPackagingCarriesNoSecretsAndNoToolsNotOffered(t *testing.T) {
 	files := []string{
 		"gemini-extension.json", "GEMINI.md",
 		".claude-plugin/plugin.json", ".claude-plugin/marketplace.json",
@@ -167,7 +167,7 @@ func TestPackagingCarriesNoSecretsAndNoResearchTools(t *testing.T) {
 	}
 	hexKey := regexp.MustCompile(`(?i)(0x)?[0-9a-f]{64}`)
 	secretWords := []string{"-----BEGIN", "PRIVATE KEY-----", "api_key=", "apikey=", "token="}
-	research := []string{"options_research", "municipal_income", "crypto_research", "crypto_yields"}
+	research := append(append([]string{}, withdrawnTools...), withheldToolNames...)
 	for _, rel := range files {
 		b, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(rel)))
 		if err != nil {
@@ -188,7 +188,7 @@ func TestPackagingCarriesNoSecretsAndNoResearchTools(t *testing.T) {
 		if strings.HasSuffix(rel, ".md") {
 			for _, name := range research {
 				if strings.Contains(s, name) {
-					t.Errorf("%s mentions %s; the packaging covers the scout data only", rel, name)
+					t.Errorf("%s mentions %s, which the server does not offer", rel, name)
 				}
 			}
 		}

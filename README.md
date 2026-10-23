@@ -2,7 +2,7 @@
 
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/dv1-321/scalpstream-mcp)
 
-Pay-per-call MCP server for Claude Desktop, Claude Code, Cursor and any MCP client: US product recalls, US border wait times, cheapest fuel prices, air quality (AQI), and options and municipal-income research, settled in USDC over x402 on Base.
+Pay-per-call MCP server for Claude Desktop, Claude Code, Cursor and any MCP client: US product recalls, US border wait times and cheapest fuel prices, settled in USDC over x402 on Base.
 
 An MCP server that buys small, factual datasets at call time with your own
 wallet, over [x402](https://x402.org) — roughly **$0.01 a call**, no account, no
@@ -24,12 +24,10 @@ you would be buying before deciding to buy it.
 | `product_recalls` | Active US recalls for a product, brand, ingredient or vehicle across FDA, NHTSA and CPSC in one query, with severity normalised onto one scale, the hazard, the remedy, and the lot numbers that tell whether a specific unit is affected. |
 | `border_crossings` | US ports of entry ranked by **all-in** time — drive plus current CBP wait — per lane type. The nearest crossing is often not the fastest. |
 | `cheapest_fuel` | Cheapest fuel by location and grade. Station-level for Spain, France, Italy; official regional averages for the US. |
-| `air_quality` | Current AQI and pollutants anywhere in the world, an EPA-based verdict on exercising outdoors, and the cleanest window ahead. |
-| `options_research` | Ranked short-term US equity options candidates with the observed metrics behind each ranking. Impersonal research data — no trade plan, sizing, or verdict. |
-| `municipal_income` | Federally tax-exempt municipal bond funds and muni CEFs, with tax-equivalent yields for the 24/32/37% brackets. |
 | `payment_status` | What's configured, what's been spent. Makes no network call and costs nothing. |
 
-Withdrawn tools are listed under [Versions](#versions).
+Withdrawn and temporarily unavailable tools are listed under
+[Versions](#versions).
 
 ## Install
 
@@ -135,7 +133,7 @@ Omit `env` entirely to run in preview-only mode.
 | `EVM_BASE_PRIVATE_KEY` | *(unset)* | Base-mainnet key holding a little USDC. Unset = preview-only. |
 | `SCALPMCP_MAX_PRICE_USD` | `0.10` | Refuse any single call quoted above this. |
 | `SCALPMCP_BUDGET_USD` | `2.00` | Refuse once the process has spent this much in total. |
-| `SCALPMCP_FEED_URL`, `_FUEL_URL`, `_AIR_URL`, `_BORDER_URL`, `_RECALL_URL` | the live services | Override a service origin, for testing against a stub. |
+| `SCALPMCP_FUEL_URL`, `_BORDER_URL`, `_RECALL_URL` | the live services | Override a service origin, for testing against a stub. |
 
 ## Paying without a crypto wallet
 
@@ -149,7 +147,6 @@ account:
 | Fuel prices | <https://mcp.apify.com?tools=rolescout/fuelscout-cheapest-fuel-prices> |
 | US border waits | <https://mcp.apify.com?tools=rolescout/borderscout-us-border-wait-times> |
 | US product recalls | <https://mcp.apify.com?tools=rolescout/recallscout-us-product-recalls> |
-| Options and municipal-income research | <https://mcp.apify.com?tools=rolescout/tradescout-stock-crypto-screener> |
 
 Those links authenticate with your Apify account; this server has no part in
 them and never needs your Apify token.
@@ -236,7 +233,7 @@ the rest of that minute, not that your key or budget is at fault.
 The server writes one line to **stderr** per tool call — the tool name, whether
 it paid, whether the result was complete or a preview, the last HTTP status and
 the elapsed milliseconds, for example
-`scalpmcp: call tool=air_quality paid=true complete=true status=200 ms=412 error=false`.
+`scalpmcp: call tool=border_crossings paid=true complete=true status=200 ms=412 error=false`.
 It never logs argument values, the spending key, or the payment payload.
 
 ## Protocol
@@ -254,11 +251,8 @@ regardless of the order the server lists them in.
 
 ## What the data is not
 
-The financial tools return impersonal, general-circulation research data,
-identical for every buyer. They are **not investment advice**, not personalised,
-and carry no trade plan, position sizing, or buy/sell verdict. The operator
-trades securities that appear in these feeds. Every response carries its own
-disclaimer and source attribution; read them.
+Every response carries its own disclaimer and source attribution; read them.
+Recall results are public-safety information, not legal or medical advice.
 
 ## Versions
 
@@ -268,13 +262,18 @@ this repository; each one is published to the MCP registry as
 [`ghcr.io/dv1-321/scalpstream-mcp`](https://github.com/DV1-321/scalpstream-mcp/pkgs/container/scalpstream-mcp)
 image. [CHANGELOG.md](CHANGELOG.md) has the details per release.
 
-**Withdrawn in 0.1.10: `crypto_yields` and `crypto_research`** (data
-licence). The feed no longer serves either board: `/yields` answers 404 Not
-Found and `/crypto` answers 410 Gone with `"error": "withdrawn"`, so a 0.1.9
-or older server that calls either tool gets that error rather than data;
-upgrade to 0.1.10 or later, where neither tool is listed. No money is taken
-for either — payment settles only when the resource is served, and the 410 is
-answered before the payment gate.
+**Withdrawn in 0.1.10: `options_research`, `municipal_income`,
+`crypto_research` and `crypto_yields`.** The ScalpStream Research boards behind
+them have been withdrawn. Every path on their host answers 410 Gone with
+`"error": "withdrawn"`, ahead of any payment, so a 0.1.9 or older server that
+calls one of these tools gets that 410 rather than data and is charged
+nothing. Upgrade to 0.1.10 or later, where none of them is listed.
+
+**Temporarily unavailable in 0.1.10: `air_quality`.** AirScout is temporarily
+unavailable, and its host answers 503 Service Unavailable with
+`"error": "unavailable"`, ahead of any payment, so an older server that calls
+the tool is charged nothing. The tool is not listed meanwhile; it returns in a
+later release when the service does.
 
 ## License
 

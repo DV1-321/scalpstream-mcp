@@ -29,10 +29,12 @@
 //	                       so it needs no ETH.
 //	SCALPMCP_MAX_PRICE_USD Per-call ceiling in dollars (default 0.10).
 //	SCALPMCP_BUDGET_USD    Whole-process ceiling in dollars (default 2.00).
-//	SCALPMCP_FEED_URL, _FUEL_URL, _AIR_URL, _BORDER_URL, _RECALL_URL
+//	SCALPMCP_FUEL_URL, _BORDER_URL, _RECALL_URL, _AIR_URL
 //	                       Override service origins (testing). One per
 //	                       service; a service with no override cannot be
 //	                       pointed at a stub, so every tool's origin has one.
+//	                       (_AIR_URL serves air_quality, which is
+//	                       temporarily unavailable and not listed.)
 package main
 
 import (
@@ -118,9 +120,6 @@ func main() {
 
 func endpointsFromEnv() endpoints {
 	e := defaultEndpoints()
-	if v := os.Getenv("SCALPMCP_FEED_URL"); v != "" {
-		e.Feed = strings.TrimRight(v, "/")
-	}
 	if v := os.Getenv("SCALPMCP_FUEL_URL"); v != "" {
 		e.Fuel = strings.TrimRight(v, "/")
 	}

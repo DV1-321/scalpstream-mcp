@@ -8,19 +8,21 @@ registry as `io.github.DV1-321/scalpstream-mcp` and as the
 
 ### Withdrawn
 
-- **`crypto_yields`** (data licence). The upstream source of the staking,
-  lending and liquidity-pool yields does not permit resale, so the tool is
-  gone from `tools/list` and the feed's `/yields` and `/preview-yields`
-  endpoints are being taken down. A 0.1.9 or older server that still lists the
-  tool will get a **404 Not Found** from the service when it is called; nothing is
-  charged for it, because payment settles only when the resource is served.
-  Upgrade to 0.1.10 or later.
-- **`crypto_research`** (data licence). The cryptocurrency board is withdrawn
-  while its market-data licence is reviewed, so the tool is gone from
-  `tools/list`. The feed's `/crypto` and `/preview-crypto` endpoints answer
-  **410 Gone** with `"error": "withdrawn"` instead of the board, ahead of the
-  payment gate, so a 0.1.9 or older server that still lists the tool gets
-  that 410 and is charged nothing. Upgrade to 0.1.10 or later.
+- **`options_research`, `municipal_income`, `crypto_research` and
+  `crypto_yields`.** The ScalpStream Research boards behind these tools have
+  been withdrawn, so the tools are gone from `tools/list` and from the
+  `initialize` instructions. Every path on their host answers **410 Gone** with
+  `"error": "withdrawn"`, ahead of any payment, so a 0.1.9 or older server that
+  still lists one of them gets that 410 and is charged nothing. Upgrade to
+  0.1.10 or later.
+
+### Temporarily unavailable
+
+- **`air_quality`.** AirScout is temporarily unavailable, so the tool is not
+  listed. Its host answers **503 Service Unavailable** with
+  `"error": "unavailable"`, ahead of any payment, so a 0.1.9 or older server
+  that calls the tool is charged nothing. It returns in a later release when
+  the service does.
 
 ### Added
 
@@ -37,9 +39,14 @@ registry as `io.github.DV1-321/scalpstream-mcp` and as the
 
 ### Changed
 
-- `initialize` instructions name every remaining domain, including US product
-  recalls (the tool shipped in 0.1.8 but was never mentioned), and no longer
-  name staking yields or crypto candidates.
+- `initialize` instructions name the three remaining domains, cheapest fuel,
+  US border-crossing wait times and US product recalls (the recalls tool
+  shipped in 0.1.8 but was never mentioned), and nothing else.
+- Calling a withdrawn tool, or `air_quality`, by name (from a client holding an
+  older tool list) returns a tool error saying it has been withdrawn or is
+  temporarily unavailable, before any request is made, instead of "unknown
+  tool".
+- `SCALPMCP_FEED_URL` is gone with the research boards.
 - `server/discover` (the MCP 2026-07-28 opening call) is answered explicitly
   with JSON-RPC `-32601`, the documented signal for a newer client to fall back
   to `initialize`. The server still speaks 2025-06-18 only.

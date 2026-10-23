@@ -38,26 +38,43 @@ type toolset struct {
 	client *client.Client
 	tools  []tool
 	byName map[string]tool
+	// notOffered maps the name of a tool this server knows but does not offer
+	// to what a caller asking for it is told. Neither tools/list nor dispatch
+	// serves one; see withdrawnNames and withheldTools.
+	notOffered map[string]string
 }
 
 func newToolset(c *client.Client, base endpoints) *toolset {
-	ts := &toolset{client: c, byName: map[string]tool{}}
+	ts := &toolset{client: c, byName: map[string]tool{}, notOffered: map[string]string{}}
 	ts.tools = buildTools(base)
 	for _, t := range ts.tools {
 		ts.byName[t.Name] = t
 	}
+	for _, name := range withdrawnNames {
+		ts.notOffered[name] = "has been withdrawn"
+	}
+	for _, t := range withheldTools(base) {
+		ts.notOffered[t.Name] = "is temporarily unavailable"
+	}
 	return ts
 }
 
+// withdrawnNames are tools earlier releases listed and this one does not: the
+// ScalpStream Research boards behind them have been withdrawn, and their host
+// answers 410 Gone on every path. A client still holding an old tool list that
+// calls one is told so, before any request, rather than "unknown tool".
+// CHANGELOG.md lists them; do not re-add one.
+var withdrawnNames = []string{"options_research", "municipal_income", "crypto_research", "crypto_yields"}
+
 // endpoints are the service origins, overridable so tests can point at a local
-// stub instead of the live, money-moving feeds.
+// stub instead of the live, money-moving feeds. Air serves only a withheld
+// tool (see withheldTools) and is kept so that tool can return unchanged.
 type endpoints struct {
-	Feed, Fuel, Air, Border, Recall string
+	Fuel, Air, Border, Recall string
 }
 
 func defaultEndpoints() endpoints {
 	return endpoints{
-		Feed:   "https://feed.scalpstream.com",
 		Fuel:   "https://fuelscout.scalpstream.com",
 		Air:    "https://airscout.scalpstream.com",
 		Border: "https://borderscout.scalpstream.com",
@@ -106,13 +123,12 @@ func (ts *toolset) instructions() string {
 	}
 	// The domain list is the tool catalogue in prose, and it must stay in step
 	// with buildTools: a domain named here that no tool serves sends a model
-	// looking for a tool that is not there (staking yields and crypto candidates,
+	// looking for a tool that is not there (the research boards and air quality,
 	// after 0.1.10), and a tool left out of it is one a model never thinks to
 	// call (recalls, before). TestInstructionsNameEveryToolDomainAndNothingElse
 	// pins both directions.
 	return "ScalpStream sells small, factual datasets per request over the x402 payment protocol " +
-		"(HTTP 402): US equity options research, federally tax-exempt municipal income, cheapest " +
-		"fuel, air quality, US border-crossing wait times and US product recalls. Every tool " +
+		"(HTTP 402): cheapest fuel, US border-crossing wait times and US product recalls. Every tool " +
 		"returns JSON. " + mode
 }
 
@@ -175,6 +191,12 @@ func (r callRecord) line(d time.Duration) string {
 func (ts *toolset) dispatch(ctx context.Context, name string, rawArgs json.RawMessage, rec *callRecord) (string, map[string]any, error) {
 	t, ok := ts.byName[name]
 	if !ok {
+		if status, known := ts.notOffered[name]; known {
+			// One of this server's own tool names, so logging it carries
+			// nothing of the caller's.
+			rec.tool = name
+			return "", nil, fmt.Errorf("%s %s; call tools/list for the available set", name, status)
+		}
 		return "", nil, fmt.Errorf("unknown tool %q; call tools/list for the available set", name)
 	}
 	rec.tool = t.Name
@@ -435,39 +457,15 @@ func obj(props map[string]any, required ...string) map[string]any {
 	return m
 }
 
+// buildTools is the catalogue: every tool here is listed by tools/list and
+// callable. The research tools (options_research, municipal_income,
+// crypto_research, crypto_yields) have been withdrawn and are in
+// withdrawnNames; air_quality is temporarily unavailable and is in
+// withheldTools.
 func buildTools(e endpoints) []tool {
 	noArgs := obj(map[string]any{})
 
 	return []tool{
-		{
-			Name:  "options_research",
-			Title: "US equity options candidates",
-			Description: "Ranked short-term US equity options candidates with the observed metrics behind each ranking " +
-				"(signal strength, score, ATR%, relative volume, RSI, VWAP distance, ATM IV, daily trend, momentum) " +
-				"and an illustrative contract. Impersonal research data, identical for every buyer — not advice, and " +
-				"it carries no trade plan, position sizing, or buy/sell verdict.",
-			Schema:   noArgs,
-			Preview:  e.Feed + "/preview",
-			Output:   envelopeSchema("Ranked options candidates with the observed metrics behind each ranking, plus the scan timestamp, the disclaimer, and the operator position disclosure."),
-			BuildURL: func(map[string]any) (string, error) { return e.Feed + "/picks", nil },
-		},
-		{
-			Name:  "municipal_income",
-			Title: "Federally tax-exempt municipal income",
-			Description: "Municipal bond funds and muni closed-end funds whose distributions are exempt from US federal " +
-				"income tax, ranked, with tax-equivalent yields computed for the 24%, 32% and 37% brackets, current " +
-				"yield, distribution frequency, growth streak and years without a cut. Impersonal research data, not advice.",
-			Schema:   noArgs,
-			Preview:  e.Feed + "/preview-dividends",
-			Output:   envelopeSchema("Ranked municipal bond funds and closed-end funds with current yield, tax-equivalent yields by bracket, distribution frequency and growth streak."),
-			BuildURL: func(map[string]any) (string, error) { return e.Feed + "/dividends", nil },
-		},
-		// crypto_yields (feed /yields and /preview-yields) and crypto_research
-		// (feed /crypto and /preview-crypto) were withdrawn in 0.1.10 over their
-		// upstream market-data licences. The feed takes those boards down too
-		// (/yields is a 404, /crypto a 410 "withdrawn"), so a tool pointing at
-		// them would be a dead paid tool. Withdrawn tools are listed in
-		// CHANGELOG.md; do not re-add one without a licence.
 		{
 			Name:  "cheapest_fuel",
 			Title: "Cheapest fuel near a location",
@@ -517,41 +515,6 @@ func buildTools(e endpoints) []tool {
 					q.Set("smart", "1")
 				}
 				return e.Fuel + "/fuel?" + q.Encode(), nil
-			},
-		},
-		{
-			Name:  "air_quality",
-			Title: "Air quality and the cleanest window to be outside",
-			Description: "Current US AQI and pollutant breakdown for any coordinates worldwide, an EPA-based verdict on " +
-				"whether it is safe to exercise outdoors, and the cleanest contiguous window in the forecast ahead " +
-				"for a session of a given length. Modelled data (Copernicus CAMS), not a sensor at the exact spot.",
-			Schema: obj(map[string]any{
-				"lat":      numProp("Latitude in decimal degrees."),
-				"lon":      numProp("Longitude in decimal degrees."),
-				"hours":    numProp("How far ahead to search for a clean window, in hours. Default 24, maximum 168."),
-				"duration": numProp("How long you want to be outside, in hours; the window returned is a contiguous block this long. Default 1, maximum 12."),
-				"place":    strProp("Optional label for the location, used in the summary text."),
-			}, "lat", "lon"),
-			Preview: e.Air + "/preview",
-			Output:  envelopeSchema("Current AQI and pollutant readings, the EPA activity verdict, and the cleanest contiguous window in the forecast ahead."),
-			BuildURL: func(args map[string]any) (string, error) {
-				lat, lon, err := requireLatLon(args)
-				if err != nil {
-					return "", err
-				}
-				q := url.Values{}
-				q.Set("lat", lat)
-				q.Set("lon", lon)
-				if h, ok := argNum(args, "hours"); ok {
-					q.Set("hours", strconv.Itoa(int(h)))
-				}
-				if d, ok := argNum(args, "duration"); ok {
-					q.Set("duration", strconv.Itoa(int(d)))
-				}
-				if p := argStr(args, "place"); p != "" {
-					q.Set("place", p)
-				}
-				return e.Air + "/air?" + q.Encode(), nil
 			},
 		},
 		{
@@ -663,6 +626,55 @@ func buildTools(e endpoints) []tool {
 			Output: envelopeSchema("Whether paid mode is enabled, confirmed and unconfirmed spend, the number of paid calls, the price per call, the accepted rails, and the custody position."),
 			Local:  true,
 			// No BuildURL: handled locally.
+		},
+	}
+}
+
+// withheldTools are tools that are temporarily unavailable. They are not in
+// the catalogue: tools/list does not show them, and a call by name is refused
+// before any request (newToolset puts them in notOffered). They are still
+// built, so the code keeps compiling and its argument checks stay tested.
+// Restoring one is moving it back into buildTools, together with its place in
+// instructions(), the README, llms-install.md and expectedTools.
+//
+// air_quality is temporarily unavailable while AirScout is; it returns as a
+// tool when the service does.
+func withheldTools(e endpoints) []tool {
+	return []tool{
+		{
+			Name:  "air_quality",
+			Title: "Air quality and the cleanest window to be outside",
+			Description: "Current US AQI and pollutant breakdown for any coordinates worldwide, an EPA-based verdict on " +
+				"whether it is safe to exercise outdoors, and the cleanest contiguous window in the forecast ahead " +
+				"for a session of a given length. Modelled data (Copernicus CAMS), not a sensor at the exact spot.",
+			Schema: obj(map[string]any{
+				"lat":      numProp("Latitude in decimal degrees."),
+				"lon":      numProp("Longitude in decimal degrees."),
+				"hours":    numProp("How far ahead to search for a clean window, in hours. Default 24, maximum 168."),
+				"duration": numProp("How long you want to be outside, in hours; the window returned is a contiguous block this long. Default 1, maximum 12."),
+				"place":    strProp("Optional label for the location, used in the summary text."),
+			}, "lat", "lon"),
+			Preview: e.Air + "/preview",
+			Output:  envelopeSchema("Current AQI and pollutant readings, the EPA activity verdict, and the cleanest contiguous window in the forecast ahead."),
+			BuildURL: func(args map[string]any) (string, error) {
+				lat, lon, err := requireLatLon(args)
+				if err != nil {
+					return "", err
+				}
+				q := url.Values{}
+				q.Set("lat", lat)
+				q.Set("lon", lon)
+				if h, ok := argNum(args, "hours"); ok {
+					q.Set("hours", strconv.Itoa(int(h)))
+				}
+				if d, ok := argNum(args, "duration"); ok {
+					q.Set("duration", strconv.Itoa(int(d)))
+				}
+				if p := argStr(args, "place"); p != "" {
+					q.Set("place", p)
+				}
+				return e.Air + "/air?" + q.Encode(), nil
+			},
 		},
 	}
 }

@@ -113,9 +113,10 @@ func TestToolsListShape(t *testing.T) {
 	got := drive(t, previewOnlyToolset(), `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
 	res := got[0]["result"].(map[string]any)
 	tools, _ := res["tools"].([]any)
-	// Exact, not "at least": a withdrawn tool creeping back in — crypto_yields or
-	// crypto_research in 0.1.10, whose feed boards are gone — would be a dead paid tool
-	// (404/410), and an unlisted new one would be unreachable. Both change this number.
+	// Exact, not "at least": a withdrawn or withheld tool creeping back in — the
+	// research tools or air_quality in 0.1.10, whose hosts answer 410 and 503 —
+	// would be a dead tool, and an unlisted new one would be unreachable. Both
+	// change this number.
 	if len(tools) != expectedToolCount {
 		t.Fatalf("expected exactly %d tools, got %d", expectedToolCount, len(tools))
 	}
@@ -153,53 +154,120 @@ func TestToolsListShape(t *testing.T) {
 			t.Errorf("tool %q was withdrawn (see CHANGELOG.md) and must not be listed", gone)
 		}
 	}
+	for _, held := range withheldToolNames {
+		if seen[held] {
+			t.Errorf("tool %q is temporarily unavailable (see CHANGELOG.md) and must not be listed", held)
+		}
+	}
 }
 
-// The catalogue as of 0.1.10. crypto_yields and crypto_research were withdrawn
-// in 0.1.10 over their upstream market-data licences; the feed's /yields (404)
-// and /crypto (410 "withdrawn") boards go away with them, so listing either tool
-// would offer a dead paid tool. The count is a literal, not
-// len(expectedTools), so that editing the list alone cannot move it.
+// The catalogue as of 0.1.10. The research tools have been withdrawn and their
+// host answers 410 Gone on every path; air_quality is temporarily unavailable
+// and its host answers 503. Listing any of them would offer a dead tool. The
+// count is a literal, not len(expectedTools), so that editing the list alone
+// cannot move it.
 var (
-	expectedTools = []string{
-		"options_research", "municipal_income",
-		"cheapest_fuel", "air_quality", "border_crossings", "product_recalls", "payment_status",
-	}
-	expectedToolCount = 7
-	withdrawnTools    = []string{"crypto_yields", "crypto_research"}
+	expectedTools     = []string{"cheapest_fuel", "border_crossings", "product_recalls", "payment_status"}
+	expectedToolCount = 4
+	withdrawnTools    = []string{"options_research", "municipal_income", "crypto_research", "crypto_yields"}
+	withheldToolNames = []string{"air_quality"}
 )
 
 // GROWTH 10-21 MCP-2. The initialize instructions are the catalogue in prose,
 // and they had drifted from it both ways: they named "staking yields" (a tool
 // being withdrawn) and never mentioned recalls (a tool that shipped in 0.1.8).
 // A model reads this text to decide what the server is for, so each remaining
-// domain must be named and no withdrawn one may be.
+// domain must be named and no withdrawn or withheld one may be.
 func TestInstructionsNameEveryToolDomainAndNothingElse(t *testing.T) {
 	text := strings.ToLower(previewOnlyToolset().instructions())
-	for _, domain := range []string{"options", "municipal", "fuel", "air quality", "border", "recalls"} {
+	for _, domain := range []string{"fuel", "border", "recalls"} {
 		if !strings.Contains(text, domain) {
 			t.Errorf("instructions do not mention %q: %q", domain, text)
 		}
 	}
-	for _, gone := range []string{"yield", "staking", "crypto"} {
+	for _, gone := range []string{"yield", "staking", "crypto", "options", "municipal", "air quality", "aqi"} {
 		if strings.Contains(text, gone) {
-			t.Errorf("instructions still mention %q, a withdrawn tool: %q", gone, text)
+			t.Errorf("instructions still mention %q, a tool that is not offered: %q", gone, text)
 		}
 	}
-	// No tool refers to the withdrawn feed endpoints either: /yields,
-	// /preview-yields, /crypto and /preview-crypto on the feed origin.
-	withdrawnPath := func(u string) bool {
-		return strings.Contains(u, "yields") || strings.Contains(u, "crypto")
-	}
-	for _, tl := range previewOnlyToolset().tools {
-		if withdrawnPath(tl.Preview) {
-			t.Errorf("%s previews from %s, a withdrawn endpoint", tl.Name, tl.Preview)
-		}
-		if tl.BuildURL != nil {
-			if u, err := tl.BuildURL(map[string]any{"country": "US", "region": "CA", "product": "x", "lat": 1, "lon": 1}); err == nil && withdrawnPath(u) {
-				t.Errorf("%s buys from %s, a withdrawn endpoint", tl.Name, u)
+	// Every listed network tool previews from and buys from a live service
+	// origin, never the withheld air origin; the research feed origin is gone
+	// from endpoints altogether.
+	eps := endpoints{Fuel: "http://fuel.test", Air: "http://air.test", Border: "http://border.test", Recall: "http://recall.test"}
+	onLive := func(u string) bool {
+		for _, origin := range []string{eps.Fuel, eps.Border, eps.Recall} {
+			if strings.HasPrefix(u, origin+"/") {
+				return true
 			}
 		}
+		return false
+	}
+	args := map[string]any{"country": "US", "region": "CA", "product": "x", "lat": 1.0, "lon": 1.0}
+	for _, tl := range newToolset(&client.Client{}, eps).tools {
+		if tl.Local {
+			continue
+		}
+		if !onLive(tl.Preview) {
+			t.Errorf("%s previews from %s, not a live service origin", tl.Name, tl.Preview)
+		}
+		if u, err := tl.BuildURL(args); err != nil || !onLive(u) {
+			t.Errorf("%s buys from %q (err %v), not a live service origin", tl.Name, u, err)
+		}
+	}
+}
+
+// air_quality is temporarily unavailable, and the research tools have been
+// withdrawn. A client holding an old tool list may still call one by name; it
+// is told which, as a tool error, before any request is made. air_quality is
+// still built, so restoring it is moving it back into buildTools, and its
+// argument checks must keep working until then.
+func TestToolsNotOfferedAreRefusedBeforeAnyRequest(t *testing.T) {
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(http.StatusPaymentRequired)
+	}))
+	defer srv.Close()
+	eps := endpoints{Fuel: srv.URL, Air: srv.URL, Border: srv.URL, Recall: srv.URL}
+	ts := newToolset(&client.Client{}, eps)
+
+	cases := map[string]string{"air_quality": "is temporarily unavailable"}
+	for _, name := range withdrawnTools {
+		cases[name] = "has been withdrawn"
+	}
+	for name, want := range cases {
+		got := drive(t, ts, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"`+name+`","arguments":{"lat":47.6588,"lon":-117.426}}}`)
+		res, _ := got[0]["result"].(map[string]any)
+		if res == nil || res["isError"] != true {
+			t.Errorf("%s: want a tool error, got %v", name, got[0])
+			continue
+		}
+		text, _ := res["content"].([]any)[0].(map[string]any)["text"].(string)
+		if !strings.HasPrefix(text, name+" "+want) {
+			t.Errorf("%s: error = %q, want it to say %q", name, text, name+" "+want)
+		}
+	}
+	if n := atomic.LoadInt32(&hits); n != 0 {
+		t.Errorf("a tool that is not offered reached a service %d times", n)
+	}
+
+	held := map[string]tool{}
+	for _, tl := range withheldTools(eps) {
+		held[tl.Name] = tl
+	}
+	if len(held) != len(withheldToolNames) {
+		t.Fatalf("withheldTools() = %d tools, want %v", len(held), withheldToolNames)
+	}
+	air, ok := held["air_quality"]
+	if !ok {
+		t.Fatal("air_quality is not in withheldTools; it must stay buildable until it returns")
+	}
+	u, err := air.BuildURL(map[string]any{"lat": "47.6588", "lon": -117.426, "hours": 48.0})
+	if err != nil || !strings.HasPrefix(u, srv.URL+"/air?") || !strings.Contains(u, "hours=48") {
+		t.Errorf("air_quality BuildURL = %q (err %v), want %s/air?...hours=48", u, err, srv.URL)
+	}
+	if _, err := air.BuildURL(map[string]any{"lat": 91.0, "lon": 0.0}); err == nil || !strings.Contains(err.Error(), "out of range") {
+		t.Errorf("air_quality BuildURL accepted lat 91 (err %v)", err)
 	}
 }
 
@@ -247,13 +315,12 @@ func TestServerDiscoverIsMethodNotFoundSoClientsFallBack(t *testing.T) {
 // binary — not only a test toolset — can be pointed at a stub. The recalls
 // service shipped in 0.1.8 without one.
 func TestEveryServiceOriginHasAnEnvOverride(t *testing.T) {
-	t.Setenv("SCALPMCP_FEED_URL", "http://feed.test/")
 	t.Setenv("SCALPMCP_FUEL_URL", "http://fuel.test")
 	t.Setenv("SCALPMCP_AIR_URL", "http://air.test/")
 	t.Setenv("SCALPMCP_BORDER_URL", "http://border.test")
 	t.Setenv("SCALPMCP_RECALL_URL", "http://recall.test/")
 	got := endpointsFromEnv()
-	want := endpoints{Feed: "http://feed.test", Fuel: "http://fuel.test", Air: "http://air.test", Border: "http://border.test", Recall: "http://recall.test"}
+	want := endpoints{Fuel: "http://fuel.test", Air: "http://air.test", Border: "http://border.test", Recall: "http://recall.test"}
 	if got != want {
 		t.Errorf("endpointsFromEnv() = %+v, want %+v", got, want)
 	}
@@ -264,7 +331,7 @@ func TestEveryServiceOriginHasAnEnvOverride(t *testing.T) {
 		t.Errorf("product_recalls URL = %q (err %v), want it under the override", u, err)
 	}
 	// With nothing set, the defaults stand.
-	for _, name := range []string{"SCALPMCP_FEED_URL", "SCALPMCP_FUEL_URL", "SCALPMCP_AIR_URL", "SCALPMCP_BORDER_URL", "SCALPMCP_RECALL_URL"} {
+	for _, name := range []string{"SCALPMCP_FUEL_URL", "SCALPMCP_AIR_URL", "SCALPMCP_BORDER_URL", "SCALPMCP_RECALL_URL"} {
 		t.Setenv(name, "")
 	}
 	if d := endpointsFromEnv(); d != defaultEndpoints() {
@@ -398,8 +465,8 @@ func TestToolsDeclareAnnotationsAndOutputSchema(t *testing.T) {
 func TestArgumentValidationRejectsBadCoordinates(t *testing.T) {
 	ts := previewOnlyToolset()
 	cases := []struct{ name, args, want string }{
-		{"air_quality", `{"lat":91,"lon":0}`, "out of range"},
-		{"air_quality", `{"lon":0}`, "required"},
+		{"border_crossings", `{"lat":91,"lon":0}`, "out of range"},
+		{"border_crossings", `{"lon":0}`, "required"},
 		{"border_crossings", `{"lat":0,"lon":-181}`, "out of range"},
 		{"cheapest_fuel", `{}`, "country is required"},
 		{"cheapest_fuel", `{"country":"US"}`, "region"},
@@ -421,21 +488,20 @@ func TestArgumentValidationRejectsBadCoordinates(t *testing.T) {
 // must work rather than one silently failing.
 func TestArgumentsAcceptStringOrNumber(t *testing.T) {
 	ts := previewOnlyToolset()
-	for _, tl := range ts.tools {
-		if tl.Name != "air_quality" {
-			continue
+	tl, ok := ts.byName["border_crossings"]
+	if !ok {
+		t.Fatal("border_crossings is not in the catalogue")
+	}
+	for _, args := range []map[string]any{
+		{"lat": 47.6588, "lon": -117.4260, "limit": float64(7)},
+		{"lat": "47.6588", "lon": "-117.4260", "limit": "7"},
+	} {
+		u, err := tl.BuildURL(args)
+		if err != nil {
+			t.Fatalf("BuildURL(%v): %v", args, err)
 		}
-		for _, args := range []map[string]any{
-			{"lat": 47.6588, "lon": -117.4260, "hours": float64(48)},
-			{"lat": "47.6588", "lon": "-117.4260", "hours": "48"},
-		} {
-			u, err := tl.BuildURL(args)
-			if err != nil {
-				t.Fatalf("BuildURL(%v): %v", args, err)
-			}
-			if !strings.Contains(u, "lat=47.6588") || !strings.Contains(u, "hours=48") {
-				t.Errorf("BuildURL(%v) = %s; expected lat and hours to survive", args, u)
-			}
+		if !strings.Contains(u, "lat=47.6588") || !strings.Contains(u, "limit=7") {
+			t.Errorf("BuildURL(%v) = %s; expected lat and limit to survive", args, u)
 		}
 	}
 }
@@ -519,12 +585,12 @@ func TestBooleanArgumentsAcceptStringsAndRejectJunk(t *testing.T) {
 func TestFreeResourceIsRenderedAsUnpaid(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"picks":[]}`)) // 200, no challenge
+		_, _ = w.Write([]byte(`{"recalls":[]}`)) // 200, no challenge
 	}))
 	defer srv.Close()
 
-	ts := newToolset(&client.Client{}, endpoints{Feed: srv.URL})
-	out, structured, err := ts.call(context.Background(), "options_research", json.RawMessage(`{}`))
+	ts := newToolset(&client.Client{}, endpoints{Recall: srv.URL})
+	out, structured, err := ts.call(context.Background(), "product_recalls", json.RawMessage(`{"product":"widget"}`))
 	if err != nil {
 		t.Fatalf("a free 200 is a success: %v", err)
 	}
@@ -544,7 +610,7 @@ func TestFreeResourceIsRenderedAsUnpaid(t *testing.T) {
 	if note, _ := got["note"].(string); !strings.Contains(note, "without a payment challenge") {
 		t.Errorf("note = %q, want it to explain why paid is false", note)
 	}
-	if got["source"] != srv.URL+"/picks" {
+	if got["source"] != srv.URL+"/recalls?product=widget" {
 		t.Errorf("source = %v", got["source"])
 	}
 }
@@ -592,8 +658,8 @@ func TestPreviewFallbackWhenNoKey(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	ts := newToolset(&client.Client{}, endpoints{Feed: srv.URL, Fuel: srv.URL, Air: srv.URL, Border: srv.URL})
-	out, structured, err := ts.call(context.Background(), "options_research", json.RawMessage(`{}`))
+	ts := newToolset(&client.Client{}, endpoints{Fuel: srv.URL, Air: srv.URL, Border: srv.URL, Recall: srv.URL})
+	out, structured, err := ts.call(context.Background(), "border_crossings", json.RawMessage(`{"lat":32.7157,"lon":-117.1611}`))
 	if err != nil {
 		t.Fatalf("preview fallback should not error: %v", err)
 	}
@@ -640,7 +706,7 @@ func TestSlowCallDoesNotBlockPing(t *testing.T) {
 	defer slow.Close()
 	defer close(release)
 
-	ts := newToolset(&client.Client{}, endpoints{Feed: slow.URL})
+	ts := newToolset(&client.Client{}, endpoints{Border: slow.URL})
 	// syncBuffer, not bytes.Buffer: this test READS the output while the server
 	// is still writing to it, and bytes.Buffer is not safe for that. The server
 	// guards its own writes correctly; the race was on the test's side of the
@@ -653,7 +719,7 @@ func TestSlowCallDoesNotBlockPing(t *testing.T) {
 	go func() { done <- s.serve(in) }()
 
 	// Start a call that will not return until we release it.
-	_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"options_research","arguments":{}}}` + "\n"))
+	_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"border_crossings","arguments":{"lat":32.7157,"lon":-117.1611}}}` + "\n"))
 	// Ping behind it must be answered while that call is still in flight.
 	_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":2,"method":"ping"}` + "\n"))
 
@@ -755,7 +821,7 @@ func TestEveryToolCallLogsOneLineWithoutArgumentValues(t *testing.T) {
 		}
 		if p := r.Header.Get("PAYMENT-SIGNATURE"); p != "" {
 			payloads = append(payloads, p)
-			_, _ = w.Write([]byte(`{"aqi":42}`))
+			_, _ = w.Write([]byte(`{"crossings":[]}`))
 			return
 		}
 		w.WriteHeader(http.StatusPaymentRequired)
@@ -764,12 +830,12 @@ func TestEveryToolCallLogsOneLineWithoutArgumentValues(t *testing.T) {
 			`"extra":{"name":"USD Coin","version":"2"}}]}`))
 	}))
 	defer srv.Close()
-	eps := endpoints{Feed: srv.URL, Fuel: srv.URL, Air: srv.URL, Border: srv.URL, Recall: srv.URL}
+	eps := endpoints{Fuel: srv.URL, Air: srv.URL, Border: srv.URL, Recall: srv.URL}
 
 	// Distinctive argument values: if any of them shows up in the log, the
 	// log is carrying the user's query.
-	const args = `{"lat":47.65881,"lon":-117.42601,"place":"SECRETPLACE","hours":48}`
-	secrets := []string{"47.65881", "117.42601", "SECRETPLACE", "hours", srv.URL, testKey, strings.TrimPrefix(testKey, "0x")}
+	const args = `{"lat":47.65881,"lon":-117.42601,"place":"SECRETPLACE","radius":48}`
+	secrets := []string{"47.65881", "117.42601", "SECRETPLACE", "radius", srv.URL, testKey, strings.TrimPrefix(testKey, "0x")}
 
 	type step struct {
 		name, args             string
@@ -782,11 +848,15 @@ func TestEveryToolCallLogsOneLineWithoutArgumentValues(t *testing.T) {
 	paidTS := newToolset(&client.Client{Signer: signer}, eps)
 	previewTS := newToolset(&client.Client{}, eps)
 	steps := []step{
-		{"air_quality", args, "air_quality", true, true, 200, false, paidTS},
-		{"air_quality", args, "air_quality", false, false, 402, false, previewTS},
+		{"border_crossings", args, "border_crossings", true, true, 200, false, paidTS},
+		{"border_crossings", args, "border_crossings", false, false, 402, false, previewTS},
 		{"payment_status", `{}`, "payment_status", false, true, 0, false, previewTS},
-		{"air_quality", `{"lat":"SECRETPLACE","lon":0}`, "air_quality", false, false, 0, true, previewTS},
+		{"border_crossings", `{"lat":"SECRETPLACE","lon":0}`, "border_crossings", false, false, 0, true, previewTS},
 		{"no_such_tool", args, "<unknown>", false, false, 0, true, previewTS},
+		// Tools that are not offered are refused by name before any request,
+		// and logged under that name, which is ours rather than the caller's.
+		{"air_quality", args, "air_quality", false, false, 0, true, paidTS},
+		{"options_research", args, "options_research", false, false, 0, true, paidTS},
 	}
 	for _, s := range steps {
 		buf := captureLog(t)

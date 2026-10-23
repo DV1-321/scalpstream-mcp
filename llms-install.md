@@ -6,16 +6,17 @@ this server up on a user's machine. Follow it top to bottom.
 ## What you are installing
 
 An MCP server that buys small factual datasets at call time over the x402
-payment protocol — US product recalls, US border-crossing waits, fuel prices,
-air quality, and market research — for about $0.01 a call. There is no account
-to create and no API key to obtain.
+payment protocol — US product recalls, US border-crossing waits and fuel
+prices — for about $0.01 a call. There is no account to create and no API key
+to obtain.
 
-The tools are `product_recalls`, `border_crossings`, `cheapest_fuel`,
-`air_quality`, `options_research`, `municipal_income` and the local
-`payment_status`. `crypto_yields` and `crypto_research` were withdrawn in 0.1.10
-(data licence): if a listing or an older install still shows either, do not
-call it — the service behind it returns 404 Not Found (`crypto_yields`) or
-410 Gone with `"error": "withdrawn"` (`crypto_research`), and charges nothing.
+The tools are `product_recalls`, `border_crossings`, `cheapest_fuel` and the
+local `payment_status`. `options_research`, `municipal_income`,
+`crypto_research` and `crypto_yields` have been withdrawn, and `air_quality`
+is temporarily unavailable. If a listing or an older install still shows one
+of them, do not call it: the withdrawn ones answer 410 Gone with
+`"error": "withdrawn"`, `air_quality` answers 503 Service Unavailable, and
+nothing is charged for either.
 
 **Install it without a wallet first.** The server is fully functional in
 preview-only mode: every paid tool returns the service's free preview plus the
@@ -103,7 +104,7 @@ configured and nothing can be charged.** If it says true, a key is present —
 check `EVM_BASE_PRIVATE_KEY` in the environment before making any call.
 
 Then try `product_recalls` with `{"product": "infant formula"}` (or
-`air_quality` with `{"lat": 47.6588, "lon": -117.4260}`). With no key it comes
+`border_crossings` with `{"lat": 32.7157, "lon": -117.1611}`). With no key it comes
 back `"paid": false, "complete": false` with the free preview under `data` and
 the exact quote under `price` — that is success, not an error.
 
@@ -149,7 +150,8 @@ Tell the user plainly:
 |---|---|
 | `command not found: scalpmcp` | `$(go env GOPATH)/bin` is not on `PATH`. Use the absolute path in the config. |
 | The container exits immediately | It was started without `-i`, so it got no stdin and read EOF. |
-| A tool named `crypto_yields` or `crypto_research` returns 404 or 410 (withdrawn) | Withdrawn in 0.1.10 (data licence). Upgrade the image or binary; nothing was charged. |
+| `options_research`, `municipal_income`, `crypto_research` or `crypto_yields` returns 410 (withdrawn) | Withdrawn in 0.1.10. Upgrade the image or binary; nothing was charged. |
+| `air_quality` returns 503 (unavailable) | Temporarily unavailable; 0.1.10 does not list it. Upgrade the image or binary; nothing was charged. |
 | Client reports a parse error or drops the connection | Something is writing to stdout. This server writes only JSON-RPC there and all diagnostics to stderr, so suspect a wrapper script. |
 | A paid tool returns `"paid": false` with a price | Expected with no key. Not an error. |
 | `EVM_BASE_PRIVATE_KEY is set but unusable` | The key is not a 32-byte hex value. It fails fast on purpose rather than silently falling back to preview mode. |
@@ -158,6 +160,5 @@ Tell the user plainly:
 
 - Tools requiring coordinates validate them locally, so a bad latitude returns an
   error rather than spending money.
-- The financial tools return impersonal, general-circulation research data. They
-  are **not** investment advice and carry no trade plan, sizing, or verdict.
-  Present their disclaimers when relaying results.
+- Every result carries the service's own disclaimer and source attribution.
+  Present them when relaying results.

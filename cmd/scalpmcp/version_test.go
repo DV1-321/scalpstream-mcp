@@ -50,6 +50,23 @@ func TestBuildVersionMatchesServerJSON(t *testing.T) {
 	}
 }
 
+// The MCP Registry caps server.json's description at 100 characters and
+// refused 0.1.8 for exceeding it (the image published, the registry entry did
+// not). The description is also the one-line catalogue every directory shows,
+// so it must not name a domain the server no longer offers.
+func TestServerJSONDescriptionFitsTheRegistry(t *testing.T) {
+	desc, _ := readServerJSON(t)["description"].(string)
+	if desc == "" || len(desc) > 100 {
+		t.Errorf("server.json description is %d characters; the registry accepts 1 to 100: %q", len(desc), desc)
+	}
+	low := strings.ToLower(desc)
+	for _, gone := range []string{"air quality", "aqi", "market", "options", "crypto", "research"} {
+		if strings.Contains(low, gone) {
+			t.Errorf("server.json description names %q, which the server does not offer: %q", gone, desc)
+		}
+	}
+}
+
 // server.json pins an exact image tag rather than a floating one, so the
 // manifest and the artifact it names have to move together.
 func TestServerJSONPinsTheMatchingImageTag(t *testing.T) {
