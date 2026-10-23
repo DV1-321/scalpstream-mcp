@@ -314,6 +314,11 @@ func envelopeSchema(dataDescription string) map[string]any {
 	}
 }
 
+// paymentRails are the rails the services accept, as payment_status reports
+// them: USDC only, on four networks. This client pays the first; each 402
+// quote lists every rail with its own asset, amount and pay-to address.
+var paymentRails = []string{"USDC on Base (used by this client)", "USDC on Arbitrum", "USDC on Polygon", "USDC on Solana"}
+
 // status is the local, free tool. It returns the same envelope every other tool
 // does — paid=false because nothing was bought, complete=true because this IS
 // the whole answer rather than a preview of one.
@@ -325,7 +330,7 @@ func (ts *toolset) status() map[string]any {
 		"spent_atomic_usdc": spent,
 		"paid_calls":        calls,
 		"price_per_call":    "$0.01 USDC",
-		"rails":             []string{"USDC on Base (used by this client)", "USDC on Arbitrum", "USDC on Polygon", "XRP on XRPL", "RLUSD on XRPL"},
+		"rails":             paymentRails,
 		"custody":           "The seller holds no keys. This client signs with your own Base key, held only in memory for the process lifetime.",
 	}
 	if unconfirmed > 0 {

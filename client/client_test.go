@@ -196,11 +196,13 @@ func TestFreeResourceIsNotCharged(t *testing.T) {
 }
 
 // A 402 offering only rails this client cannot settle must fail clearly rather
-// than picking something it cannot sign for.
+// than picking something it cannot sign for. USDC on Solana is one the sellers
+// accept and this EVM-only client does not pay.
 func TestNonEVMOnlyChallengeIsRefused(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusPaymentRequired)
-		_, _ = w.Write([]byte(`{"x402Version":2,"accepts":[{"scheme":"exact","network":"xrpl:0","amount":"9669","asset":"XRP","payTo":"rAbc"}]}`))
+		_, _ = w.Write([]byte(`{"x402Version":2,"accepts":[{"scheme":"exact","network":"solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp",` +
+			`"amount":"10000","asset":"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v","payTo":"11111111111111111111111111111111"}]}`))
 	}))
 	defer srv.Close()
 

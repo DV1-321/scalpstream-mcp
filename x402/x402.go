@@ -53,8 +53,8 @@ type StdResource struct {
 type StdAccept struct {
 	// Scheme is the settlement scheme; "exact" is the one this package pays.
 	Scheme string `json:"scheme"`
-	// Network is CAIP-2, e.g. "eip155:8453" for Base or "xrpl:0" for the XRP
-	// Ledger.
+	// Network is CAIP-2, e.g. "eip155:8453" for Base or
+	// "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp" for Solana mainnet.
 	Network string `json:"network"`
 	// Amount is in the asset's ATOMIC units — 10000 is $0.01 of a 6-decimal
 	// USDC, not ten thousand dollars. Kept as a string so no float rounding can

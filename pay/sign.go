@@ -16,8 +16,8 @@ import (
 // Buyer-side EIP-3009 signing.
 //
 // This is CLIENT code. The resource server never calls it and never holds a
-// key — it exists so our own agent (and the end-to-end test) can pay an EVM
-// x402 charge, exactly as internal/xrpl signs an XRPL payment for the agent.
+// key — it exists so our own buyers (the MCP server, a command-line buyer and
+// the end-to-end test) can pay a USDC x402 charge on an EVM rail.
 //
 // EIP-3009 transferWithAuthorization lets a token holder authorise a transfer
 // off-chain; anyone may then submit it and pay the gas. That indirection is
