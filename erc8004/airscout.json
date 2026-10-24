@@ -1,7 +1,7 @@
 {
   "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
   "name": "AirScout",
-  "description": "AirScout (current air quality and the cleanest window to be outside) is temporarily unavailable. It will return.",
+  "description": "Current US AQI and pollutants for any point on Earth, whether it is safe to exercise outdoors (EPA AirNow categories), and the cleanest and worst windows in the next 7 days. Plain GET with free previews; USDC 0.01 per query over x402 on Base, Arbitrum, Polygon or Solana. A2A 0.3.0 JSON-RPC at https://airscout.scalpstream.com/a2a, OpenAPI at https://airscout.scalpstream.com/openapi.json. Modelled data (Copernicus CAMS via Open-Meteo), not medical advice.",
   "image": "https://airscout.scalpstream.com/icon.png",
   "services": [
     { "name": "web", "endpoint": "https://airscout.scalpstream.com/" },
@@ -10,7 +10,7 @@
     { "name": "email", "endpoint": "dfergin@wgu.edu" }
   ],
   "x402Support": true,
-  "active": false,
+  "active": true,
   "registrations": [
     { "agentId": 117025, "agentRegistry": "eip155:8453:0x8004A169FB4a3325136EB29fA0ceB6D2e539a432" }
   ],

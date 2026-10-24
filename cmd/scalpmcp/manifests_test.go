@@ -156,8 +156,7 @@ func TestSkillFrontmatter(t *testing.T) {
 }
 
 // The packaging must carry no secret and must not point an agent at a tool the
-// server does not offer: the withdrawn research tools, or air_quality while it
-// is temporarily unavailable. A hex run of 64 digits is a private key or a
+// server does not offer: the withdrawn research tools. A hex run of 64 digits is a private key or a
 // signature; neither belongs in a file a gallery republishes.
 func TestPackagingCarriesNoSecretsAndNoToolsNotOffered(t *testing.T) {
 	files := []string{
@@ -167,7 +166,7 @@ func TestPackagingCarriesNoSecretsAndNoToolsNotOffered(t *testing.T) {
 	}
 	hexKey := regexp.MustCompile(`(?i)(0x)?[0-9a-f]{64}`)
 	secretWords := []string{"-----BEGIN", "PRIVATE KEY-----", "api_key=", "apikey=", "token="}
-	research := append(append([]string{}, withdrawnTools...), withheldToolNames...)
+	research := append([]string{}, withdrawnTools...)
 	for _, rel := range files {
 		b, err := os.ReadFile(filepath.Join("..", "..", filepath.FromSlash(rel)))
 		if err != nil {

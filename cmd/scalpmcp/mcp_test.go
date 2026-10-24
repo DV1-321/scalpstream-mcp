@@ -113,9 +113,8 @@ func TestToolsListShape(t *testing.T) {
 	got := drive(t, previewOnlyToolset(), `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
 	res := got[0]["result"].(map[string]any)
 	tools, _ := res["tools"].([]any)
-	// Exact, not "at least": a withdrawn or withheld tool creeping back in — the
-	// research tools or air_quality in 0.1.10, whose hosts answer 410 and 503 —
-	// would be a dead tool, and an unlisted new one would be unreachable. Both
+	// Exact, not "at least": a withdrawn tool creeping back in — the research
+	// tools in 0.1.10, whose host answers 410 — would be a dead tool, and an unlisted new one would be unreachable. Both
 	// change this number.
 	if len(tools) != expectedToolCount {
 		t.Fatalf("expected exactly %d tools, got %d", expectedToolCount, len(tools))
@@ -154,48 +153,40 @@ func TestToolsListShape(t *testing.T) {
 			t.Errorf("tool %q was withdrawn (see CHANGELOG.md) and must not be listed", gone)
 		}
 	}
-	for _, held := range withheldToolNames {
-		if seen[held] {
-			t.Errorf("tool %q is temporarily unavailable (see CHANGELOG.md) and must not be listed", held)
-		}
-	}
 }
 
 // The catalogue as of 0.1.10. The research tools have been withdrawn and their
-// host answers 410 Gone on every path; air_quality is temporarily unavailable
-// and its host answers 503. Listing any of them would offer a dead tool. The
-// count is a literal, not len(expectedTools), so that editing the list alone
-// cannot move it.
+// host answers 410 Gone on every path; listing one would offer a dead tool.
+// air_quality is back, served from AirScout's self-hosted data. The count is a
+// literal, not len(expectedTools), so that editing the list alone cannot move it.
 var (
-	expectedTools     = []string{"cheapest_fuel", "border_crossings", "product_recalls", "payment_status"}
-	expectedToolCount = 4
+	expectedTools     = []string{"cheapest_fuel", "air_quality", "border_crossings", "product_recalls", "payment_status"}
+	expectedToolCount = 5
 	withdrawnTools    = []string{"options_research", "municipal_income", "crypto_research", "crypto_yields"}
-	withheldToolNames = []string{"air_quality"}
 )
 
 // GROWTH 10-21 MCP-2. The initialize instructions are the catalogue in prose,
 // and they had drifted from it both ways: they named "staking yields" (a tool
 // being withdrawn) and never mentioned recalls (a tool that shipped in 0.1.8).
 // A model reads this text to decide what the server is for, so each remaining
-// domain must be named and no withdrawn or withheld one may be.
+// domain must be named and no withdrawn one may be.
 func TestInstructionsNameEveryToolDomainAndNothingElse(t *testing.T) {
 	text := strings.ToLower(previewOnlyToolset().instructions())
-	for _, domain := range []string{"fuel", "border", "recalls"} {
+	for _, domain := range []string{"fuel", "air quality", "border", "recalls"} {
 		if !strings.Contains(text, domain) {
 			t.Errorf("instructions do not mention %q: %q", domain, text)
 		}
 	}
-	for _, gone := range []string{"yield", "staking", "crypto", "options", "municipal", "air quality", "aqi"} {
+	for _, gone := range []string{"yield", "staking", "crypto", "options", "municipal"} {
 		if strings.Contains(text, gone) {
 			t.Errorf("instructions still mention %q, a tool that is not offered: %q", gone, text)
 		}
 	}
 	// Every listed network tool previews from and buys from a live service
-	// origin, never the withheld air origin; the research feed origin is gone
-	// from endpoints altogether.
+	// origin; the research feed origin is gone from endpoints altogether.
 	eps := endpoints{Fuel: "http://fuel.test", Air: "http://air.test", Border: "http://border.test", Recall: "http://recall.test"}
 	onLive := func(u string) bool {
-		for _, origin := range []string{eps.Fuel, eps.Border, eps.Recall} {
+		for _, origin := range []string{eps.Fuel, eps.Air, eps.Border, eps.Recall} {
 			if strings.HasPrefix(u, origin+"/") {
 				return true
 			}
@@ -216,11 +207,10 @@ func TestInstructionsNameEveryToolDomainAndNothingElse(t *testing.T) {
 	}
 }
 
-// air_quality is temporarily unavailable, and the research tools have been
-// withdrawn. A client holding an old tool list may still call one by name; it
-// is told which, as a tool error, before any request is made. air_quality is
-// still built, so restoring it is moving it back into buildTools, and its
-// argument checks must keep working until then.
+// The research tools have been withdrawn. A client holding an old tool list may
+// still call one by name; it is told so, as a tool error, before any request is
+// made. air_quality, temporarily unavailable on the paused branch, is offered
+// again and builds its request from its arguments.
 func TestToolsNotOfferedAreRefusedBeforeAnyRequest(t *testing.T) {
 	var hits int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -231,7 +221,7 @@ func TestToolsNotOfferedAreRefusedBeforeAnyRequest(t *testing.T) {
 	eps := endpoints{Fuel: srv.URL, Air: srv.URL, Border: srv.URL, Recall: srv.URL}
 	ts := newToolset(&client.Client{}, eps)
 
-	cases := map[string]string{"air_quality": "is temporarily unavailable"}
+	cases := map[string]string{}
 	for _, name := range withdrawnTools {
 		cases[name] = "has been withdrawn"
 	}
@@ -251,16 +241,12 @@ func TestToolsNotOfferedAreRefusedBeforeAnyRequest(t *testing.T) {
 		t.Errorf("a tool that is not offered reached a service %d times", n)
 	}
 
-	held := map[string]tool{}
-	for _, tl := range withheldTools(eps) {
-		held[tl.Name] = tl
+	if _, refused := ts.notOffered["air_quality"]; refused {
+		t.Error("air_quality is refused by name; it is offered again")
 	}
-	if len(held) != len(withheldToolNames) {
-		t.Fatalf("withheldTools() = %d tools, want %v", len(held), withheldToolNames)
-	}
-	air, ok := held["air_quality"]
+	air, ok := ts.byName["air_quality"]
 	if !ok {
-		t.Fatal("air_quality is not in withheldTools; it must stay buildable until it returns")
+		t.Fatal("air_quality is not in the catalogue")
 	}
 	u, err := air.BuildURL(map[string]any{"lat": "47.6588", "lon": -117.426, "hours": 48.0})
 	if err != nil || !strings.HasPrefix(u, srv.URL+"/air?") || !strings.Contains(u, "hours=48") {
@@ -853,9 +839,9 @@ func TestEveryToolCallLogsOneLineWithoutArgumentValues(t *testing.T) {
 		{"payment_status", `{}`, "payment_status", false, true, 0, false, previewTS},
 		{"border_crossings", `{"lat":"SECRETPLACE","lon":0}`, "border_crossings", false, false, 0, true, previewTS},
 		{"no_such_tool", args, "<unknown>", false, false, 0, true, previewTS},
+		{"air_quality", args, "air_quality", false, false, 402, false, previewTS},
 		// Tools that are not offered are refused by name before any request,
 		// and logged under that name, which is ours rather than the caller's.
-		{"air_quality", args, "air_quality", false, false, 0, true, paidTS},
 		{"options_research", args, "options_research", false, false, 0, true, paidTS},
 	}
 	for _, s := range steps {

@@ -1,6 +1,6 @@
 {
   "name": "scalpstream",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Pay-per-call US product recalls, US border wait times and cheapest fuel prices for Claude Code, over x402. Runs the published Docker image; preview-only until the user configures a throwaway wallet.",
   "author": {
     "name": "DV1-321",
@@ -13,7 +13,7 @@
   "mcpServers": {
     "scalpstream": {
       "command": "docker",
-      "args": ["run", "-i", "--rm", "ghcr.io/dv1-321/scalpstream-mcp:v0.1.9"]
+      "args": ["run", "-i", "--rm", "ghcr.io/dv1-321/scalpstream-mcp:v0.1.10"]
     }
   }
 }

@@ -21,21 +21,16 @@ func readRepoFile(t *testing.T, rel string) string {
 // An older install that still lists a tool this release does not offer gets an
 // HTTP error from the service, and the docs tell an installing agent which one
 // to expect. Since 2026-10-22 the research feed's host answers 410 Gone with
-// "error": "withdrawn" on every path, /yields included, and AirScout's host
-// answers 503 with "error": "unavailable"; both are answered at the edge,
+// "error": "withdrawn" on every path, /yields included, answered at the edge
 // before any payment. A doc that still promises a 404 sends the reader looking
 // for a status that never appears.
 func TestDocsNameTheStatusOfToolsNotOffered(t *testing.T) {
 	gone410 := regexp.MustCompile(`\b410\b`)
-	held503 := regexp.MustCompile(`\b503\b`)
 	any404 := regexp.MustCompile(`\b404\b`)
 	for _, rel := range []string{"README.md", "llms-install.md", "CHANGELOG.md"} {
 		s := readRepoFile(t, rel)
 		if !gone410.MatchString(s) {
 			t.Errorf("%s explains the withdrawn tools without the 410 Gone they get", rel)
-		}
-		if !held503.MatchString(s) {
-			t.Errorf("%s explains air_quality without the 503 it gets", rel)
 		}
 		if any404.MatchString(s) {
 			t.Errorf("%s mentions a 404; no tool that is not offered returns one any more", rel)
@@ -45,7 +40,7 @@ func TestDocsNameTheStatusOfToolsNotOffered(t *testing.T) {
 
 // The README's Tools table and llms-install.md's tool sentence are the
 // catalogue as a reader meets it, so each must name exactly the tools
-// tools/list serves: a withdrawn or withheld tool named there is documented as
+// tools/list serves: a withdrawn tool named there is documented as
 // available, and a served tool left out is one nobody tries.
 func TestDocsListExactlyTheOfferedTools(t *testing.T) {
 	want := append([]string{}, expectedTools...)

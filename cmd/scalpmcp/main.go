@@ -29,12 +29,10 @@
 //	                       so it needs no ETH.
 //	SCALPMCP_MAX_PRICE_USD Per-call ceiling in dollars (default 0.10).
 //	SCALPMCP_BUDGET_USD    Whole-process ceiling in dollars (default 2.00).
-//	SCALPMCP_FUEL_URL, _BORDER_URL, _RECALL_URL, _AIR_URL
+//	SCALPMCP_FUEL_URL, _AIR_URL, _BORDER_URL, _RECALL_URL
 //	                       Override service origins (testing). One per
 //	                       service; a service with no override cannot be
 //	                       pointed at a stub, so every tool's origin has one.
-//	                       (_AIR_URL serves air_quality, which is
-//	                       temporarily unavailable and not listed.)
 package main
 
 import (
@@ -64,7 +62,7 @@ import (
 // the release workflow computed the version and then never passed it to the
 // linker. The workflow now stamps it and refuses to publish a tag that
 // disagrees with this file.
-var buildVersion = "0.1.9"
+var buildVersion = "0.1.10"
 
 // userAgent identifies this program on every outbound request. Without it the
 // Go default ("Go-http-client/1.1") made MCP installs indistinguishable from

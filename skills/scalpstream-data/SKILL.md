@@ -7,7 +7,7 @@ description: Use when a task needs current US product recalls (FDA, NHTSA, CPSC)
 
 Three small HTTP services sell factual lookups per request over the x402
 payment protocol (HTTP 402), about $0.01 a call in USDC on Base (also USDC on
-Arbitrum and Polygon, and XRP or RLUSD on the XRP Ledger). Each one also
+Arbitrum, Polygon and Solana). Each one also
 answers a free, plain-language question. No account, no API key.
 
 | Service | Use it when the task needs | Origin |

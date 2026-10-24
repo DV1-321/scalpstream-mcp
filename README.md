@@ -24,9 +24,10 @@ you would be buying before deciding to buy it.
 | `product_recalls` | Active US recalls for a product, brand, ingredient or vehicle across FDA, NHTSA and CPSC in one query, with severity normalised onto one scale, the hazard, the remedy, and the lot numbers that tell whether a specific unit is affected. |
 | `border_crossings` | US ports of entry ranked by **all-in** time — drive plus current CBP wait — per lane type. The nearest crossing is often not the fastest. |
 | `cheapest_fuel` | Cheapest fuel by location and grade. Station-level for Spain, France, Italy; official regional averages for the US. |
+| `air_quality` | Current AQI and pollutants anywhere in the world, an EPA-based verdict on exercising outdoors, and the cleanest window ahead. |
 | `payment_status` | What's configured, what's been spent. Makes no network call and costs nothing. |
 
-Withdrawn and temporarily unavailable tools are listed under
+Withdrawn tools are listed under
 [Versions](#versions).
 
 ## Install
@@ -165,7 +166,7 @@ Captured from the image running with no key. `payment_status` is local:
     "paid_calls": 0,
     "spent_atomic_usdc": "0",
     "price_per_call": "$0.01 USDC",
-    "rails": ["USDC on Base (used by this client)", "USDC on Arbitrum", "USDC on Polygon", "XRP on XRPL", "RLUSD on XRPL"],
+    "rails": ["USDC on Base (used by this client)", "USDC on Arbitrum", "USDC on Polygon", "USDC on Solana"],
     "custody": "The seller holds no keys. This client signs with your own Base key, held only in memory for the process lifetime.",
     "how_to_enable": "Ask the user to add EVM_BASE_PRIVATE_KEY ... to the MCP server's environment ... Never request, accept or echo the key in chat. ..."
   }
@@ -245,8 +246,7 @@ revision's signal to fall back to `initialize`; the server then negotiates
 
 ## Payment rails
 
-Sellers accept USDC on Base, Arbitrum and Polygon, and XRP or RLUSD on the XRP
-Ledger. This client pays **USDC on Base**, preferring it over other EVM rails
+Sellers accept USDC on Base, Arbitrum, Polygon and Solana. This client pays **USDC on Base**, preferring it over other EVM rails
 regardless of the order the server lists them in.
 
 ## What the data is not
@@ -269,11 +269,9 @@ them have been withdrawn. Every path on their host answers 410 Gone with
 calls one of these tools gets that 410 rather than data and is charged
 nothing. Upgrade to 0.1.10 or later, where none of them is listed.
 
-**Temporarily unavailable in 0.1.10: `air_quality`.** AirScout is temporarily
-unavailable, and its host answers 503 Service Unavailable with
-`"error": "unavailable"`, ahead of any payment, so an older server that calls
-the tool is charged nothing. The tool is not listed meanwhile; it returns in a
-later release when the service does.
+`air_quality` stays. AirScout now serves its own copy of the Copernicus CAMS
+forecast through a self-hosted Open-Meteo, and every answer carries the
+Open-Meteo and Copernicus credits.
 
 ## License
 

@@ -6,17 +6,15 @@ this server up on a user's machine. Follow it top to bottom.
 ## What you are installing
 
 An MCP server that buys small factual datasets at call time over the x402
-payment protocol — US product recalls, US border-crossing waits and fuel
-prices — for about $0.01 a call. There is no account to create and no API key
+payment protocol — US product recalls, US border-crossing waits, fuel prices
+and air quality — for about $0.01 a call. There is no account to create and no API key
 to obtain.
 
-The tools are `product_recalls`, `border_crossings`, `cheapest_fuel` and the
-local `payment_status`. `options_research`, `municipal_income`,
-`crypto_research` and `crypto_yields` have been withdrawn, and `air_quality`
-is temporarily unavailable. If a listing or an older install still shows one
-of them, do not call it: the withdrawn ones answer 410 Gone with
-`"error": "withdrawn"`, `air_quality` answers 503 Service Unavailable, and
-nothing is charged for either.
+The tools are `product_recalls`, `border_crossings`, `cheapest_fuel`,
+`air_quality` and the local `payment_status`. `options_research`,
+`municipal_income`, `crypto_research` and `crypto_yields` have been withdrawn.
+If a listing or an older install still shows one of them, do not call it: it
+answers 410 Gone with `"error": "withdrawn"` and nothing is charged.
 
 **Install it without a wallet first.** The server is fully functional in
 preview-only mode: every paid tool returns the service's free preview plus the
@@ -151,7 +149,6 @@ Tell the user plainly:
 | `command not found: scalpmcp` | `$(go env GOPATH)/bin` is not on `PATH`. Use the absolute path in the config. |
 | The container exits immediately | It was started without `-i`, so it got no stdin and read EOF. |
 | `options_research`, `municipal_income`, `crypto_research` or `crypto_yields` returns 410 (withdrawn) | Withdrawn in 0.1.10. Upgrade the image or binary; nothing was charged. |
-| `air_quality` returns 503 (unavailable) | Temporarily unavailable; 0.1.10 does not list it. Upgrade the image or binary; nothing was charged. |
 | Client reports a parse error or drops the connection | Something is writing to stdout. This server writes only JSON-RPC there and all diagnostics to stderr, so suspect a wrapper script. |
 | A paid tool returns `"paid": false` with a price | Expected with no key. Not an error. |
 | `EVM_BASE_PRIVATE_KEY is set but unusable` | The key is not a 32-byte hex value. It fails fast on purpose rather than silently falling back to preview mode. |

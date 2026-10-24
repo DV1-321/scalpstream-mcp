@@ -4,7 +4,7 @@ Releases are the Git tags on this repository. Each is published to the MCP
 registry as `io.github.DV1-321/scalpstream-mcp` and as the
 `ghcr.io/dv1-321/scalpstream-mcp` image.
 
-## Unreleased (0.1.10)
+## 0.1.10
 
 ### Withdrawn
 
@@ -15,14 +15,6 @@ registry as `io.github.DV1-321/scalpstream-mcp` and as the
   `"error": "withdrawn"`, ahead of any payment, so a 0.1.9 or older server that
   still lists one of them gets that 410 and is charged nothing. Upgrade to
   0.1.10 or later.
-
-### Temporarily unavailable
-
-- **`air_quality`.** AirScout is temporarily unavailable, so the tool is not
-  listed. Its host answers **503 Service Unavailable** with
-  `"error": "unavailable"`, ahead of any payment, so a 0.1.9 or older server
-  that calls the tool is charged nothing. It returns in a later release when
-  the service does.
 
 ### Added
 
@@ -39,13 +31,16 @@ registry as `io.github.DV1-321/scalpstream-mcp` and as the
 
 ### Changed
 
-- `initialize` instructions name the three remaining domains, cheapest fuel,
-  US border-crossing wait times and US product recalls (the recalls tool
-  shipped in 0.1.8 but was never mentioned), and nothing else.
-- Calling a withdrawn tool, or `air_quality`, by name (from a client holding an
-  older tool list) returns a tool error saying it has been withdrawn or is
-  temporarily unavailable, before any request is made, instead of "unknown
-  tool".
+- `initialize` instructions name the four remaining domains, cheapest fuel,
+  air quality, US border-crossing wait times and US product recalls (the
+  recalls tool shipped in 0.1.8 but was never mentioned), and nothing else.
+- `air_quality` is unchanged. AirScout now answers from a self-hosted
+  Open-Meteo, and its answers carry the Open-Meteo and Copernicus credits.
+- `payment_status` lists the rails the services accept: USDC on Base,
+  Arbitrum, Polygon and Solana.
+- Calling a withdrawn tool by name (from a client holding an older tool list)
+  returns a tool error saying it has been withdrawn, before any request is
+  made, instead of "unknown tool".
 - `SCALPMCP_FEED_URL` is gone with the research boards.
 - `server/discover` (the MCP 2026-07-28 opening call) is answered explicitly
   with JSON-RPC `-32601`, the documented signal for a newer client to fall back

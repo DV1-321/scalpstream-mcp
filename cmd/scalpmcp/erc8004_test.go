@@ -8,10 +8,10 @@ import (
 
 // erc8004/*.json are the agentURIs of on-chain registrations, served raw from
 // main, so they go public the moment a branch merges. Each must stay valid
-// JSON. ScalpStream Research has been withdrawn and AirScout is temporarily
-// unavailable, so both registrations say so and are marked inactive; the
-// research one no longer lists the A2A and x402 services, whose host answers
-// 410 Gone on every path. The three scouts that stay are active.
+// JSON. ScalpStream Research has been withdrawn, so its registration says so,
+// is marked inactive and no longer lists the A2A and x402 services, whose host
+// answers 410 Gone on every path. The four scouts, AirScout included since it
+// returned on self-hosted data, are active.
 func TestERC8004Registrations(t *testing.T) {
 	paths, err := filepath.Glob(filepath.Join("..", "..", "erc8004", "*.json"))
 	if err != nil || len(paths) == 0 {
@@ -43,14 +43,11 @@ func TestERC8004Registrations(t *testing.T) {
 	}
 
 	air := readJSONFile(t, "erc8004/airscout.json")
-	if d, _ := air["description"].(string); !strings.Contains(d, "temporarily unavailable") {
-		t.Errorf("AirScout description does not say it is temporarily unavailable: %q", d)
-	}
-	if air["active"] != false {
-		t.Errorf("AirScout active = %v, want false while it is temporarily unavailable", air["active"])
+	if d, _ := air["description"].(string); strings.Contains(d, "unavailable") || strings.Contains(d, "XRP") {
+		t.Errorf("AirScout description still says it is unavailable, or offers a rail it does not take: %q", d)
 	}
 
-	for _, rel := range []string{"erc8004/fuelscout.json", "erc8004/borderscout.json", "erc8004/recallscout.json"} {
+	for _, rel := range []string{"erc8004/fuelscout.json", "erc8004/airscout.json", "erc8004/borderscout.json", "erc8004/recallscout.json"} {
 		if m := readJSONFile(t, rel); m["active"] != true {
 			t.Errorf("%s: active = %v, want true", rel, m["active"])
 		}

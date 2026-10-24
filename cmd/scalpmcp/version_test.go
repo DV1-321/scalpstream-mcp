@@ -60,7 +60,7 @@ func TestServerJSONDescriptionFitsTheRegistry(t *testing.T) {
 		t.Errorf("server.json description is %d characters; the registry accepts 1 to 100: %q", len(desc), desc)
 	}
 	low := strings.ToLower(desc)
-	for _, gone := range []string{"air quality", "aqi", "market", "options", "crypto", "research"} {
+	for _, gone := range []string{"market", "options", "crypto", "research"} {
 		if strings.Contains(low, gone) {
 			t.Errorf("server.json description names %q, which the server does not offer: %q", gone, desc)
 		}
