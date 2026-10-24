@@ -310,9 +310,10 @@ func envelopeSchema(dataDescription string) map[string]any {
 }
 
 // paymentRails are the rails the services accept, as payment_status reports
-// them: USDC only, on four networks. This client pays the first; each 402
+// them: USDC on four networks, and XRP or RLUSD on the XRP Ledger. This client
+// pays the first; each 402
 // quote lists every rail with its own asset, amount and pay-to address.
-var paymentRails = []string{"USDC on Base (used by this client)", "USDC on Arbitrum", "USDC on Polygon", "USDC on Solana"}
+var paymentRails = []string{"USDC on Base (used by this client)", "USDC on Arbitrum", "USDC on Polygon", "USDC on Solana", "XRP on XRPL", "RLUSD on XRPL"}
 
 // status is the local, free tool. It returns the same envelope every other tool
 // does — paid=false because nothing was bought, complete=true because this IS

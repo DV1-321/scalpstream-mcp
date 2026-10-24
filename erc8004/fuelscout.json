@@ -1,7 +1,7 @@
 {
   "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
   "name": "FuelScout",
-  "description": "Cheapest fuel nearby for agents: station-level prices for Spain, France and Italy and official EIA regional averages for the US, optionally ranked by all-in cost including the detour. Plain GET with free previews; USDC 0.01 per query over x402 on Base, Arbitrum or Polygon, or XRP/RLUSD on the XRP Ledger. A2A 0.3.0 JSON-RPC at https://fuelscout.scalpstream.com/a2a, OpenAPI at https://fuelscout.scalpstream.com/openapi.json. Official open data, may be delayed.",
+  "description": "Cheapest fuel nearby for agents: station-level prices for Spain, France and Italy and official EIA regional averages for the US, optionally ranked by all-in cost including the detour. Plain GET with free previews; USDC 0.01 per query over x402 on Base, Arbitrum, Polygon or Solana, or XRP/RLUSD on the XRP Ledger. A2A 0.3.0 JSON-RPC at https://fuelscout.scalpstream.com/a2a, OpenAPI at https://fuelscout.scalpstream.com/openapi.json. Official open data, may be delayed.",
   "image": "https://fuelscout.scalpstream.com/icon.png",
   "services": [
     { "name": "web", "endpoint": "https://fuelscout.scalpstream.com/" },

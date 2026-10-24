@@ -4,6 +4,14 @@ Releases are the Git tags on this repository. Each is published to the MCP
 registry as `io.github.DV1-321/scalpstream-mcp` and as the
 `ghcr.io/dv1-321/scalpstream-mcp` image.
 
+## Unreleased
+
+### Fixed
+
+- `payment_status` lists every rail the services accept again: USDC on Base,
+  Arbitrum, Polygon and Solana, and XRP or RLUSD on the XRP Ledger. 0.1.10
+  listed only the USDC rails. This client still pays USDC on Base.
+
 ## 0.1.10
 
 ### Withdrawn

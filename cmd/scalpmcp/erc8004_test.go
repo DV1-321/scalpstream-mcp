@@ -43,8 +43,8 @@ func TestERC8004Registrations(t *testing.T) {
 	}
 
 	air := readJSONFile(t, "erc8004/airscout.json")
-	if d, _ := air["description"].(string); strings.Contains(d, "unavailable") || strings.Contains(d, "XRP") {
-		t.Errorf("AirScout description still says it is unavailable, or offers a rail it does not take: %q", d)
+	if d, _ := air["description"].(string); strings.Contains(d, "unavailable") {
+		t.Errorf("AirScout description still says it is unavailable: %q", d)
 	}
 
 	for _, rel := range []string{"erc8004/fuelscout.json", "erc8004/airscout.json", "erc8004/borderscout.json", "erc8004/recallscout.json"} {

@@ -1,7 +1,7 @@
 {
   "type": "https://eips.ethereum.org/EIPS/eip-8004#registration-v1",
   "name": "BorderScout",
-  "description": "Ranks the 85 US ports of entry by total time (drive plus live CBP wait) per lane type from any location, for passenger, pedestrian and commercial traffic. Plain GET with free previews; USDC 0.01 per query over x402 on Base, Arbitrum or Polygon, or XRP/RLUSD on the XRP Ledger. A2A 0.3.0 JSON-RPC at https://borderscout.scalpstream.com/a2a, OpenAPI at https://borderscout.scalpstream.com/openapi.json. Wait times are CBP's own published figures.",
+  "description": "Ranks the 85 US ports of entry by total time (drive plus live CBP wait) per lane type from any location, for passenger, pedestrian and commercial traffic. Plain GET with free previews; USDC 0.01 per query over x402 on Base, Arbitrum, Polygon or Solana, or XRP/RLUSD on the XRP Ledger. A2A 0.3.0 JSON-RPC at https://borderscout.scalpstream.com/a2a, OpenAPI at https://borderscout.scalpstream.com/openapi.json. Wait times are CBP's own published figures.",
   "image": "https://borderscout.scalpstream.com/icon.png",
   "services": [
     { "name": "web", "endpoint": "https://borderscout.scalpstream.com/" },
