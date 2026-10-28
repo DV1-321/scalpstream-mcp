@@ -160,8 +160,8 @@ func TestToolsListShape(t *testing.T) {
 // air_quality is back, served from AirScout's self-hosted data. The count is a
 // literal, not len(expectedTools), so that editing the list alone cannot move it.
 var (
-	expectedTools     = []string{"cheapest_fuel", "air_quality", "border_crossings", "product_recalls", "payment_status"}
-	expectedToolCount = 5
+	expectedTools     = []string{"cheapest_fuel", "air_quality", "border_crossings", "product_recalls", "wash_sale_check", "payment_status"}
+	expectedToolCount = 6
 	withdrawnTools    = []string{"options_research", "municipal_income", "crypto_research", "crypto_yields"}
 )
 
@@ -172,7 +172,7 @@ var (
 // domain must be named and no withdrawn one may be.
 func TestInstructionsNameEveryToolDomainAndNothingElse(t *testing.T) {
 	text := strings.ToLower(previewOnlyToolset().instructions())
-	for _, domain := range []string{"fuel", "air quality", "border", "recalls"} {
+	for _, domain := range []string{"fuel", "air quality", "border", "recalls", "wash-sale"} {
 		if !strings.Contains(text, domain) {
 			t.Errorf("instructions do not mention %q: %q", domain, text)
 		}
@@ -184,16 +184,16 @@ func TestInstructionsNameEveryToolDomainAndNothingElse(t *testing.T) {
 	}
 	// Every listed network tool previews from and buys from a live service
 	// origin; the research feed origin is gone from endpoints altogether.
-	eps := endpoints{Fuel: "http://fuel.test", Air: "http://air.test", Border: "http://border.test", Recall: "http://recall.test"}
+	eps := endpoints{Fuel: "http://fuel.test", Air: "http://air.test", Border: "http://border.test", Recall: "http://recall.test", Basis: "http://basis.test"}
 	onLive := func(u string) bool {
-		for _, origin := range []string{eps.Fuel, eps.Air, eps.Border, eps.Recall} {
+		for _, origin := range []string{eps.Fuel, eps.Air, eps.Border, eps.Recall, eps.Basis} {
 			if strings.HasPrefix(u, origin+"/") {
 				return true
 			}
 		}
 		return false
 	}
-	args := map[string]any{"country": "US", "region": "CA", "product": "x", "lat": 1.0, "lon": 1.0}
+	args := map[string]any{"country": "US", "region": "CA", "product": "x", "lat": 1.0, "lon": 1.0, "trades": "fid,taxable,2026-08-01,PLTR,buy,100,10"}
 	for _, tl := range newToolset(&client.Client{}, eps).tools {
 		if tl.Local {
 			continue
@@ -218,7 +218,7 @@ func TestToolsNotOfferedAreRefusedBeforeAnyRequest(t *testing.T) {
 		w.WriteHeader(http.StatusPaymentRequired)
 	}))
 	defer srv.Close()
-	eps := endpoints{Fuel: srv.URL, Air: srv.URL, Border: srv.URL, Recall: srv.URL}
+	eps := endpoints{Fuel: srv.URL, Air: srv.URL, Border: srv.URL, Recall: srv.URL, Basis: srv.URL}
 	ts := newToolset(&client.Client{}, eps)
 
 	cases := map[string]string{}
@@ -305,8 +305,9 @@ func TestEveryServiceOriginHasAnEnvOverride(t *testing.T) {
 	t.Setenv("SCALPMCP_AIR_URL", "http://air.test/")
 	t.Setenv("SCALPMCP_BORDER_URL", "http://border.test")
 	t.Setenv("SCALPMCP_RECALL_URL", "http://recall.test/")
+	t.Setenv("SCALPMCP_BASIS_URL", "http://basis.test/")
 	got := endpointsFromEnv()
-	want := endpoints{Fuel: "http://fuel.test", Air: "http://air.test", Border: "http://border.test", Recall: "http://recall.test"}
+	want := endpoints{Fuel: "http://fuel.test", Air: "http://air.test", Border: "http://border.test", Recall: "http://recall.test", Basis: "http://basis.test"}
 	if got != want {
 		t.Errorf("endpointsFromEnv() = %+v, want %+v", got, want)
 	}
@@ -316,8 +317,13 @@ func TestEveryServiceOriginHasAnEnvOverride(t *testing.T) {
 	if err != nil || !strings.HasPrefix(u, "http://recall.test/recalls?") {
 		t.Errorf("product_recalls URL = %q (err %v), want it under the override", u, err)
 	}
+	// And the basis tool buys from its override.
+	u, err = ts.byName["wash_sale_check"].BuildURL(map[string]any{"trades": "fid,taxable,2026-08-01,PLTR,buy,100,10"})
+	if err != nil || !strings.HasPrefix(u, "http://basis.test/basis?") {
+		t.Errorf("wash_sale_check URL = %q (err %v), want it under the override", u, err)
+	}
 	// With nothing set, the defaults stand.
-	for _, name := range []string{"SCALPMCP_FUEL_URL", "SCALPMCP_AIR_URL", "SCALPMCP_BORDER_URL", "SCALPMCP_RECALL_URL"} {
+	for _, name := range []string{"SCALPMCP_FUEL_URL", "SCALPMCP_AIR_URL", "SCALPMCP_BORDER_URL", "SCALPMCP_RECALL_URL", "SCALPMCP_BASIS_URL"} {
 		t.Setenv(name, "")
 	}
 	if d := endpointsFromEnv(); d != defaultEndpoints() {
@@ -467,6 +473,54 @@ func TestArgumentValidationRejectsBadCoordinates(t *testing.T) {
 		if !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s(%s) error = %q, want it to mention %q", c.name, c.args, err, c.want)
 		}
+	}
+}
+
+// wash_sale_check validates its arguments before any request: the trades are
+// required, a check needs its symbol (and it must be in the trades), a sell
+// needs its account and quantity, and the fields of one question are refused
+// on the other. A valid call carries the trades verbatim and nothing else
+// that was not asked for.
+func TestWashSaleCheckArguments(t *testing.T) {
+	ts := previewOnlyToolset()
+	tl, ok := ts.byName["wash_sale_check"]
+	if !ok {
+		t.Fatal("wash_sale_check is not in the catalogue")
+	}
+	const trades = "fid,taxable,2026-08-01,PLTR,buy,100,10;fid,taxable,2026-09-03,PLTR,sell,100,8"
+	for _, c := range []struct{ args, want string }{
+		{`{}`, "trades is required"},
+		{`{"trades":"` + trades + `","check":"buy"}`, "needs symbol"},
+		{`{"trades":"` + trades + `","check":"buy","symbol":"AAPL"}`, "does not appear in trades"},
+		{`{"trades":"` + trades + `","check":"hold","symbol":"PLTR"}`, "check must be buy or sell"},
+		{`{"trades":"` + trades + `","symbol":"PLTR"}`, "symbol only applies with check"},
+		{`{"trades":"` + trades + `","check":"sell","symbol":"PLTR"}`, "needs account"},
+		{`{"trades":"` + trades + `","check":"sell","symbol":"PLTR","account":"fid","quantity":0}`, "quantity must be a positive number"},
+		{`{"trades":"` + trades + `","check":"buy","symbol":"PLTR","account":"fid"}`, "account and quantity apply to check=sell"},
+		{`{"trades":"` + trades + `","check":"sell","symbol":"PLTR","account":"fid","quantity":10,"account_type":"roth_ira"}`, "account_type applies to check=buy"},
+		{`{"trades":"` + trades + `","check":"buy","symbol":"PLTR","on":"20/09/2026"}`, "on must be a date"},
+		{`{"trades":"` + trades + `","year":1980}`, "year must be a four-digit tax year"},
+	} {
+		_, _, err := ts.call(context.Background(), "wash_sale_check", json.RawMessage(c.args))
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("wash_sale_check(%s) error = %v, want it to mention %q", c.args, err, c.want)
+		}
+	}
+	u, err := tl.BuildURL(map[string]any{"trades": trades, "check": "Buy", "symbol": "pltr", "on": "2026-09-20", "account_type": "roth_ira", "year": "2026"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"/basis?", "check=buy", "symbol=PLTR", "on=2026-09-20", "account_type=roth_ira", "year=2026", "trades=fid%2Ctaxable"} {
+		if !strings.Contains(u, want) {
+			t.Errorf("BuildURL = %s, want it to contain %s", u, want)
+		}
+	}
+	u, err = tl.BuildURL(map[string]any{"trades": []any{map[string]any{"account": "fid", "account_type": "taxable", "date": "2026-08-01", "symbol": "PLTR", "kind": "buy", "quantity": 100, "price": 10}}, "check": "sell", "symbol": "PLTR", "account": "fid", "quantity": "50"})
+	if err != nil || !strings.Contains(u, "check=sell") || !strings.Contains(u, "account=fid") || !strings.Contains(u, "quantity=50") || !strings.Contains(u, "trades=%5B%7B") {
+		t.Errorf("array trades: url=%s err=%v", u, err)
+	}
+	if u, err := tl.BuildURL(map[string]any{"trades": trades}); err != nil || strings.Contains(u, "check=") || strings.Contains(u, "symbol=") {
+		t.Errorf("ledger alone: url=%s err=%v", u, err)
 	}
 }
 
@@ -816,12 +870,14 @@ func TestEveryToolCallLogsOneLineWithoutArgumentValues(t *testing.T) {
 			`"extra":{"name":"USD Coin","version":"2"}}]}`))
 	}))
 	defer srv.Close()
-	eps := endpoints{Fuel: srv.URL, Air: srv.URL, Border: srv.URL, Recall: srv.URL}
+	eps := endpoints{Fuel: srv.URL, Air: srv.URL, Border: srv.URL, Recall: srv.URL, Basis: srv.URL}
 
 	// Distinctive argument values: if any of them shows up in the log, the
-	// log is carrying the user's query.
+	// log is carrying the user's query. The trades of a wash-sale check are
+	// the most sensitive argument this server ever sees.
 	const args = `{"lat":47.65881,"lon":-117.42601,"place":"SECRETPLACE","radius":48}`
-	secrets := []string{"47.65881", "117.42601", "SECRETPLACE", "radius", srv.URL, testKey, strings.TrimPrefix(testKey, "0x")}
+	const tradeArgs = `{"trades":"SECRETACCT,taxable,2026-08-01,ZZZQ,buy,100,10","check":"buy","symbol":"ZZZQ"}`
+	secrets := []string{"47.65881", "117.42601", "SECRETPLACE", "radius", "SECRETACCT", "ZZZQ", srv.URL, testKey, strings.TrimPrefix(testKey, "0x")}
 
 	type step struct {
 		name, args             string
@@ -840,6 +896,8 @@ func TestEveryToolCallLogsOneLineWithoutArgumentValues(t *testing.T) {
 		{"border_crossings", `{"lat":"SECRETPLACE","lon":0}`, "border_crossings", false, false, 0, true, previewTS},
 		{"no_such_tool", args, "<unknown>", false, false, 0, true, previewTS},
 		{"air_quality", args, "air_quality", false, false, 402, false, previewTS},
+		{"wash_sale_check", tradeArgs, "wash_sale_check", false, false, 402, false, previewTS},
+		{"wash_sale_check", `{"trades":"SECRETACCT,taxable,2026-08-01,ZZZQ,buy,100,10","check":"buy"}`, "wash_sale_check", false, false, 0, true, previewTS},
 		// Tools that are not offered are refused by name before any request,
 		// and logged under that name, which is ours rather than the caller's.
 		{"options_research", args, "options_research", false, false, 0, true, paidTS},

@@ -2,8 +2,8 @@
 
 This extension runs the ScalpStream MCP server in Docker. It buys small, factual
 datasets per call over the x402 payment protocol: US product recalls, US border
-crossing wait times, and cheapest fuel prices. There is no account and no API
-key. The install above has no wallet configured, so it runs **preview-only**.
+crossing wait times, cheapest fuel prices, air quality and a wash-sale check on
+the user's own trades. There is no account and no API key. The install above has no wallet configured, so it runs **preview-only**.
 
 ## What every tool returns
 
@@ -34,6 +34,14 @@ The tools:
   and lane eligibility. The nearest crossing is often not the fastest.
 - `cheapest_fuel` - cheapest stations near a point in Spain, France or Italy
   for a fuel grade, or the official EIA weekly average for a US state.
+- `air_quality` - current US AQI and pollutants for any coordinates, an
+  EPA-based outdoor exercise verdict and the cleanest window ahead.
+- `wash_sale_check` - the US wash-sale rule (IRC 1091) applied to the user's
+  own trades across taxable, IRA and spouse accounts: would buying or selling
+  a ticker on a date wash a loss, by how much, and the first safe rebuy date,
+  or the whole ledger with adjusted basis and the year's totals. A rule
+  calculation, not tax advice; the service keeps nothing. Pass the trades only
+  when the user gave them for this, and relay the statement verbatim.
 - `payment_status` - whether paid calls are enabled and what this process has
   spent. Local, free, safe to call first.
 

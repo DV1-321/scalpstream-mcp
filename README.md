@@ -2,7 +2,7 @@
 
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/dv1-321/scalpstream-mcp)
 
-Pay-per-call MCP server for Claude Desktop, Claude Code, Cursor and any MCP client: US product recalls, US border wait times and cheapest fuel prices, settled in USDC over x402 on Base.
+Pay-per-call MCP server for Claude Desktop, Claude Code, Cursor and any MCP client: US product recalls, US border wait times, cheapest fuel prices, air quality and a wash-sale check on your own trades, settled in USDC over x402 on Base.
 
 An MCP server that buys small, factual datasets at call time with your own
 wallet, over [x402](https://x402.org) — roughly **$0.01 a call**, no account, no
@@ -25,6 +25,7 @@ you would be buying before deciding to buy it.
 | `border_crossings` | US ports of entry ranked by **all-in** time — drive plus current CBP wait — per lane type. The nearest crossing is often not the fastest. |
 | `cheapest_fuel` | Cheapest fuel by location and grade. Station-level for Spain, France, Italy; official regional averages for the US. |
 | `air_quality` | Current AQI and pollutants anywhere in the world, an EPA-based verdict on exercising outdoors, and the cleanest window ahead. |
+| `wash_sale_check` | The US wash-sale rule (IRC 1091) applied to the user's **own** trades across taxable, IRA and spouse accounts: would buying or selling a ticker on a date wash a loss, by how much, and the first safe rebuy date; or the whole ledger with adjusted basis and the year's totals. A rule calculation, not tax advice; the service keeps nothing. |
 | `payment_status` | What's configured, what's been spent. Makes no network call and costs nothing. |
 
 Withdrawn tools are listed under
@@ -134,7 +135,7 @@ Omit `env` entirely to run in preview-only mode.
 | `EVM_BASE_PRIVATE_KEY` | *(unset)* | Base-mainnet key holding a little USDC. Unset = preview-only. |
 | `SCALPMCP_MAX_PRICE_USD` | `0.10` | Refuse any single call quoted above this. |
 | `SCALPMCP_BUDGET_USD` | `2.00` | Refuse once the process has spent this much in total. |
-| `SCALPMCP_FUEL_URL`, `_BORDER_URL`, `_RECALL_URL` | the live services | Override a service origin, for testing against a stub. |
+| `SCALPMCP_FUEL_URL`, `_AIR_URL`, `_BORDER_URL`, `_RECALL_URL`, `_BASIS_URL` | the live services | Override a service origin, for testing against a stub. |
 
 ## Paying without a crypto wallet
 
@@ -253,6 +254,11 @@ regardless of the order the server lists them in.
 
 Every response carries its own disclaimer and source attribution; read them.
 Recall results are public-safety information, not legal or medical advice.
+A wash-sale check is a record-keeping calculation on the trades you sent under
+the US rule, matched on the same ticker only; it is not tax advice and never
+computes tax owed. The trades travel in the request and the service processes
+them in memory, storing and logging nothing; this server never logs them
+either.
 
 ## Versions
 

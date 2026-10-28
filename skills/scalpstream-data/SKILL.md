@@ -1,11 +1,11 @@
 ---
 name: scalpstream-data
-description: Use when a task needs current US product recalls (FDA, NHTSA, CPSC), US land-border crossing wait times, or cheapest fuel prices (station-level in Spain, France and Italy; US state averages) from the ScalpStream services RecallScout, BorderScout and FuelScout. Covers the free A2A question-and-answer calls, the paid x402 GET routes and their parameters, the MCP tool names, the refusal codes, and the spending rules an agent must keep.
+description: Use when a task needs current US product recalls (FDA, NHTSA, CPSC), US land-border crossing wait times, cheapest fuel prices (station-level in Spain, France and Italy; US state averages), or a US wash-sale check (IRC 1091) on the user's own stock trades, from the ScalpStream services RecallScout, BorderScout, FuelScout and BasisScout. Covers the free A2A question-and-answer calls, the paid x402 GET routes and their parameters, the MCP tool names, the refusal codes, and the spending rules an agent must keep.
 ---
 
-# ScalpStream data: recalls, border waits, fuel prices
+# ScalpStream data: recalls, border waits, fuel prices, wash-sale checks
 
-Three small HTTP services sell factual lookups per request over the x402
+Four small HTTP services sell factual answers per request over the x402
 payment protocol (HTTP 402), about $0.01 a call in USDC on Base (also USDC on
 Arbitrum, Polygon and Solana, and XRP or RLUSD on the XRP Ledger). Each one also
 answers a free, plain-language question. No account, no API key.
@@ -15,12 +15,19 @@ answers a free, plain-language question. No account, no API key.
 | RecallScout | whether a product, brand, ingredient or vehicle is under an active US recall, how severe, and the lot numbers or UPCs that say whether one unit is affected. FDA, NHTSA and CPSC in one lookup. | `https://recallscout.scalpstream.com` |
 | BorderScout | which US land port of entry is fastest from a point, counting the drive plus the live CBP wait, per vehicle type and lane. The nearest crossing is often not the fastest. | `https://borderscout.scalpstream.com` |
 | FuelScout | the cheapest stations near a point in Spain, France or Italy for a fuel grade, or the official EIA weekly average for a US state. | `https://fuelscout.scalpstream.com` |
+| BasisScout | whether buying or selling a ticker on a date would wash a loss under the US rule (IRC 1091), on the user's OWN trades across taxable, IRA and spouse accounts: the disallowed amount, the first safe rebuy date, the replacement shares' adjusted basis, and the year's realized figures. No outside data; the input is the trades. | `https://basisscout.scalpstream.com` |
 
-Do not use them for: recalls outside the US, sea or air borders, or fuel
-prices outside ES, FR, IT and the US. Every answer carries its own source line
-and disclaimer; relay them. The recall services say so and set `complete:
-false` when a regulator could not be reached; an incomplete lookup is never an
-all-clear.
+Do not use them for: recalls outside the US, sea or air borders, fuel prices
+outside ES, FR, IT and the US, or wash-sale questions outside the US federal
+rule (options, short sales, "substantially identical" pairs and digital assets
+are not modelled; it matches the same ticker only). Every answer carries its
+own source line and disclaimer; relay them. The recall service says so and
+sets `complete: false` when a regulator could not be reached; an incomplete
+lookup is never an all-clear. A wash-sale answer is a rule calculation on the
+trades sent, never a recommendation and never tax advice; it cannot see trades
+it was not sent, so "no open window" means none among those. Send the user's
+trades only when they gave them for this purpose; the service processes them
+in memory and keeps nothing.
 
 ## Free A2A calls
 
@@ -46,11 +53,18 @@ gives the exact paid URL to run:
 - FuelScout: the lowest price in range, the local average and the nearest
   station with its price (US: the current EIA average). Paid: which stations,
   with names, addresses and distances.
+- BasisScout: the pre-trade answer in a sentence ("Buying PLTR before Oct 4,
+  2026 disallows $200.00 from your Sep 3, 2026 sale in fid. Safe to rebuy Oct
+  4, 2026."). Paid: the whole ledger as JSON. The chat form lists the trades
+  as clauses: "bought 100 PLTR at 10 on 2026-08-01 in fid; sold 100 PLTR at 8
+  on 2026-09-03 in fid. can I buy PLTR on 2026-09-20?" (put "roth", "ira" or
+  "spouse" in an account's name for those).
 
 Questions that work: "is infant formula recalled", "any recalls on a 2020
 Honda Accord", "border wait times near San Diego", "fastest crossing from
 Laredo for a truck", "cheapest diesel near Madrid", "gas prices in
-California". Send `help` for the service's menu.
+California", "when is it safe to rebuy PLTR?" (after the trades). Send `help`
+for the service's menu.
 
 The free endpoint is limited to 60 requests per minute per client. A `GET` on
 `/a2a` redirects to the discovery document; it is not an error.
@@ -67,6 +81,7 @@ has a free `GET /preview` describing the data and parameters.
 | `GET /recalls` | `product=<name>` for a product, brand or ingredient (matched as a phrase; keep it short), or `make`, `model` and `year` together for a vehicle. Send one or the other. `include_ended=1` adds terminated recalls; `limit` caps each list (default 10). |
 | `GET /crossings` | `lat`, `lon` (decimal degrees) of the starting point; `vehicle` is `passenger`, `commercial` or `pedestrian`; `lanes` is a comma list the traveller may use (`standard`, `SENTRI/NEXUS`, `Ready`, `FAST`; default standard only, because claiming a lane the traveller cannot enter returns a wait they cannot have); `radius` in km; `limit` (default 5); `place` as a label. |
 | `GET /fuel` | `country` is `ES`, `FR` or `IT` with `lat` and `lon` for stations, or `US` with `region=<state code>` for the EIA average. `grade` is `e5`, `e10`, `sp98`, `diesel`, `diesel_premium` or `lpg`. `smart=1` ranks by all-in cost including the detour. |
+| `GET /basis` | `trades` (required): rows `account,account_type,date,symbol,kind,quantity,price[,fees]` separated by `;` (account_type `taxable`, `trad_ira`, `roth_ira`, `spouse_taxable`, `spouse_ira`; kind `buy`, `sell`, `reinvest`, `stock_plan_acquire`; dates YYYY-MM-DD), or a JSON array; at most 500 rows. `check=buy` with `symbol`, `on` and optionally `account_type`; `check=sell` with `symbol`, `on`, `account` and `quantity`; no `check` for the ledger alone. `year` picks the year to total. |
 
 Examples:
 
@@ -76,12 +91,14 @@ https://recallscout.scalpstream.com/recalls?make=Honda&model=Accord&year=2020
 https://borderscout.scalpstream.com/crossings?lat=32.7157&lon=-117.1611&vehicle=passenger
 https://fuelscout.scalpstream.com/fuel?country=ES&lat=40.4168&lon=-3.7038&grade=diesel&smart=1
 https://fuelscout.scalpstream.com/fuel?country=US&region=CA&grade=diesel
+https://basisscout.scalpstream.com/basis?trades=fid,taxable,2026-08-01,PLTR,buy,100,10;fid,taxable,2026-09-03,PLTR,sell,100,8&check=buy&symbol=PLTR&on=2026-09-20
 ```
 
 ### Through the ScalpStream MCP server
 
-The same routes are the MCP tools `product_recalls`, `border_crossings` and
-`cheapest_fuel` (plus the local, free `payment_status`) in
+The same routes are the MCP tools `product_recalls`, `border_crossings`,
+`cheapest_fuel`, `air_quality` and `wash_sale_check` (plus the local, free
+`payment_status`) in
 `ghcr.io/dv1-321/scalpstream-mcp`. The server validates arguments locally
 before anything is paid, pays from its own configured wallet, and returns one
 envelope: `paid`, `complete`, `source`, `data`, and when nothing was paid

@@ -6,6 +6,24 @@ registry as `io.github.DV1-321/scalpstream-mcp` and as the
 
 ## Unreleased
 
+### Added
+
+- **`wash_sale_check`**: the US wash-sale rule (IRC section 1091) applied to
+  the user's own trades, served by BasisScout
+  (`https://basisscout.scalpstream.com`). `check=buy` asks whether buying a
+  ticker on a date would disallow a loss already taken (how much, from which
+  sale, and the first safe rebuy date); `check=sell` whether a sale at a loss
+  is already washed by a purchase in the 30 days before; no check returns the
+  ledger alone: determinations, sales with realized/disallowed/allowed split
+  short and long term, open lots with adjusted basis and holding date, and
+  the year's totals. Taxable, IRA and spouse accounts together, with an IRA
+  replacement marked as a permanent loss. Arguments are validated locally
+  before anything is paid (trades required, a check needs its symbol, a sell
+  its account and quantity). Every answer is a rule calculation, not tax
+  advice; the service processes the trades in memory and keeps nothing, and
+  this server never logs them. `SCALPMCP_BASIS_URL` overrides the origin.
+- The `initialize` instructions and the skill name the new domain.
+
 ### Fixed
 
 - `payment_status` lists every rail the services accept again: USDC on Base,

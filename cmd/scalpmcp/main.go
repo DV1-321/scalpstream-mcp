@@ -29,7 +29,7 @@
 //	                       so it needs no ETH.
 //	SCALPMCP_MAX_PRICE_USD Per-call ceiling in dollars (default 0.10).
 //	SCALPMCP_BUDGET_USD    Whole-process ceiling in dollars (default 2.00).
-//	SCALPMCP_FUEL_URL, _AIR_URL, _BORDER_URL, _RECALL_URL
+//	SCALPMCP_FUEL_URL, _AIR_URL, _BORDER_URL, _RECALL_URL, _BASIS_URL
 //	                       Override service origins (testing). One per
 //	                       service; a service with no override cannot be
 //	                       pointed at a stub, so every tool's origin has one.
@@ -132,6 +132,9 @@ func endpointsFromEnv() endpoints {
 	// exercised against a local stub from a running binary.
 	if v := os.Getenv("SCALPMCP_RECALL_URL"); v != "" {
 		e.Recall = strings.TrimRight(v, "/")
+	}
+	if v := os.Getenv("SCALPMCP_BASIS_URL"); v != "" {
+		e.Basis = strings.TrimRight(v, "/")
 	}
 	return e
 }

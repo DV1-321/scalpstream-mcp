@@ -66,7 +66,7 @@ var withdrawnNames = []string{"options_research", "municipal_income", "crypto_re
 // endpoints are the service origins, overridable so tests can point at a local
 // stub instead of the live, money-moving feeds.
 type endpoints struct {
-	Fuel, Air, Border, Recall string
+	Fuel, Air, Border, Recall, Basis string
 }
 
 func defaultEndpoints() endpoints {
@@ -75,6 +75,7 @@ func defaultEndpoints() endpoints {
 		Air:    "https://airscout.scalpstream.com",
 		Border: "https://borderscout.scalpstream.com",
 		Recall: "https://recallscout.scalpstream.com",
+		Basis:  "https://basisscout.scalpstream.com",
 	}
 }
 
@@ -122,9 +123,10 @@ func (ts *toolset) instructions() string {
 	// looking for a tool that is not there (the research boards, after 0.1.10), and a tool left out of it is one a model never thinks to
 	// call (recalls, before). TestInstructionsNameEveryToolDomainAndNothingElse
 	// pins both directions.
-	return "ScalpStream sells small, factual datasets per request over the x402 payment protocol " +
-		"(HTTP 402): cheapest fuel, air quality, US border-crossing wait times and US product recalls. Every tool " +
-		"returns JSON. " + mode
+	return "ScalpStream sells small, factual answers per request over the x402 payment protocol " +
+		"(HTTP 402): cheapest fuel, air quality, US border-crossing wait times, US product recalls, and a " +
+		"wash-sale check on the user's own stock trades (US rule, IRC 1091: a calculation, not tax advice). " +
+		"Every tool returns JSON. " + mode
 }
 
 // howToEnable is returned INTO the model's context whenever a paid call could
@@ -650,6 +652,109 @@ func buildTools(e endpoints) []tool {
 					q.Set("limit", strconv.Itoa(int(n)))
 				}
 				return e.Recall + "/recalls?" + q.Encode(), nil
+			},
+		},
+		{
+			Name:  "wash_sale_check",
+			Title: "Would this trade wash a loss (US wash-sale rule)",
+			Description: "Applies the US wash-sale rule (IRC section 1091) to the user's OWN trades, across taxable, IRA " +
+				"and spouse accounts together, and answers a pre-trade question: check=buy asks whether buying `symbol` " +
+				"on date `on` would disallow a loss already taken, and returns the disallowed amount, which sale it comes " +
+				"from and the first safe rebuy date; check=sell asks whether selling `quantity` shares of `symbol` from " +
+				"`account` at a loss on `on` is already washed by a purchase in the 30 days before. Leave check out for " +
+				"the ledger alone: every determination, every sale with realized/disallowed/allowed and short/long term, " +
+				"every open lot's adjusted basis and holding date, and the year's totals. A purchase in an IRA loses the " +
+				"loss permanently and the answer says so. The trades are sent in the request and processed in memory " +
+				"only; the service stores and logs nothing. Everything returned is a rule calculation on the trades " +
+				"given, in sentences that state the rule and never recommend a trade; it is not tax advice, never " +
+				"computes tax owed, matches the same ticker only (no \"substantially identical\" judgment) and cannot " +
+				"see trades it was not sent. Relay the statement and the disclaimer verbatim.",
+			Schema: obj(map[string]any{
+				"trades": strProp("The user's trades, one per row: account,account_type,date,symbol,kind,quantity,price[,fees], " +
+					"rows separated by ';' (account_type: taxable, trad_ira, roth_ira, spouse_taxable, spouse_ira; kind: buy, " +
+					"sell, reinvest, stock_plan_acquire; dates YYYY-MM-DD). A JSON array of objects with those field names " +
+					"also works. At most 500 rows; send every account's trades in the ticker for the 61 days around the date " +
+					"asked about, and the whole year for yearly totals."),
+				"check":        enumProp("The pre-trade question. Omit for the ledger alone.", "buy", "sell"),
+				"symbol":       strProp("The ticker the question is about, as it appears in trades. Required with check."),
+				"on":           strProp("The date of the proposed trade, YYYY-MM-DD. Default: today."),
+				"account_type": enumProp("check=buy: where the purchase would be. A purchase in an IRA disallows the loss permanently. Default taxable.", "taxable", "trad_ira", "roth_ira", "spouse_taxable", "spouse_ira"),
+				"account":      strProp("check=sell: the account the shares would be sold from, as named in trades. Required with check=sell."),
+				"quantity":     numProp("check=sell: how many shares would be sold. Required with check=sell."),
+				"year":         numProp("The tax year to total. Default: the year of `on` with a check, otherwise the year of the latest trade."),
+			}, "trades"),
+			Preview: e.Basis + "/preview",
+			Output: envelopeSchema("The wash-sale calculation on the trades sent: `check` (the answer, with `statement`, `safe`, " +
+				"`safe_date`, `max_disallowed`, `permanent`, and the open `windows` or `replacements`), `determinations`, " +
+				"`sales`, `open_lots`, `year_summary`, `errors`, plus `scope`, `privacy`, `source` and the disclaimer."),
+			BuildURL: func(args map[string]any) (string, error) {
+				trades := argStr(args, "trades")
+				if raw, isList := args["trades"].([]any); isList {
+					b, err := json.Marshal(raw)
+					if err != nil {
+						return "", fmt.Errorf("trades: %w", err)
+					}
+					trades = string(b)
+				}
+				if trades == "" {
+					return "", errors.New("trades is required: the user's trades as rows account,account_type,date,symbol,kind,quantity,price[,fees] separated by ';', or a JSON array")
+				}
+				if len(trades) > 48<<10 {
+					return "", fmt.Errorf("trades is %d bytes; the service takes at most %d (send one ticker's trades for the period that matters)", len(trades), 48<<10)
+				}
+				q := url.Values{}
+				q.Set("trades", trades)
+				check := strings.ToLower(argStr(args, "check"))
+				symbol := strings.ToUpper(argStr(args, "symbol"))
+				switch check {
+				case "":
+					if symbol != "" {
+						return "", errors.New("symbol only applies with check=buy or check=sell; omit it for the ledger alone")
+					}
+				case "buy", "sell":
+					if symbol == "" {
+						return "", fmt.Errorf("check=%s needs symbol, the ticker the question is about", check)
+					}
+					if !strings.Contains(strings.ToUpper(trades), symbol) {
+						return "", fmt.Errorf("symbol %s does not appear in trades; the check would answer about nothing", symbol)
+					}
+					q.Set("check", check)
+					q.Set("symbol", symbol)
+				default:
+					return "", fmt.Errorf("check must be buy or sell (or omitted for the ledger alone), got %q", check)
+				}
+				if on := argStr(args, "on"); on != "" {
+					if _, err := time.Parse("2006-01-02", on); err != nil {
+						return "", fmt.Errorf("on must be a date, YYYY-MM-DD, got %q", on)
+					}
+					q.Set("on", on)
+				}
+				if at := strings.ToLower(argStr(args, "account_type")); at != "" {
+					if check != "buy" {
+						return "", errors.New("account_type applies to check=buy only")
+					}
+					q.Set("account_type", at)
+				}
+				account, qty := argStr(args, "account"), argStr(args, "quantity")
+				if check == "sell" {
+					if account == "" || qty == "" {
+						return "", errors.New("check=sell needs account (the selling account, as named in trades) and quantity (shares)")
+					}
+					if n, ok := argNum(args, "quantity"); !ok || n <= 0 {
+						return "", fmt.Errorf("quantity must be a positive number of shares, got %q", qty)
+					}
+					q.Set("account", account)
+					q.Set("quantity", qty)
+				} else if account != "" || qty != "" {
+					return "", errors.New("account and quantity apply to check=sell only")
+				}
+				if y, ok := argNum(args, "year"); ok {
+					if y < 1990 || y > 2100 || y != float64(int(y)) {
+						return "", fmt.Errorf("year must be a four-digit tax year, got %v", args["year"])
+					}
+					q.Set("year", strconv.Itoa(int(y)))
+				}
+				return e.Basis + "/basis?" + q.Encode(), nil
 			},
 		},
 		{

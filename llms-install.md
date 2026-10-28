@@ -6,12 +6,13 @@ this server up on a user's machine. Follow it top to bottom.
 ## What you are installing
 
 An MCP server that buys small factual datasets at call time over the x402
-payment protocol — US product recalls, US border-crossing waits, fuel prices
-and air quality — for about $0.01 a call. There is no account to create and no API key
+payment protocol — US product recalls, US border-crossing waits, fuel prices,
+air quality and a wash-sale check on the user's own stock trades — for about
+$0.01 a call. There is no account to create and no API key
 to obtain.
 
 The tools are `product_recalls`, `border_crossings`, `cheapest_fuel`,
-`air_quality` and the local `payment_status`. `options_research`,
+`air_quality`, `wash_sale_check` and the local `payment_status`. `options_research`,
 `municipal_income`, `crypto_research` and `crypto_yields` have been withdrawn.
 If a listing or an older install still shows one of them, do not call it: it
 answers 410 Gone with `"error": "withdrawn"` and nothing is charged.
@@ -159,3 +160,6 @@ Tell the user plainly:
   error rather than spending money.
 - Every result carries the service's own disclaimer and source attribution.
   Present them when relaying results.
+- `wash_sale_check` takes the user's own trades as an argument. Pass them only
+  when the user gave them for this purpose, relay the `statement` and the
+  disclaimer verbatim, and never present the result as tax advice.
