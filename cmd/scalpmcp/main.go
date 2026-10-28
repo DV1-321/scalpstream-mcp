@@ -62,7 +62,7 @@ import (
 // the release workflow computed the version and then never passed it to the
 // linker. The workflow now stamps it and refuses to publish a tag that
 // disagrees with this file.
-var buildVersion = "0.1.10"
+var buildVersion = "0.1.11"
 
 // userAgent identifies this program on every outbound request. Without it the
 // Go default ("Go-http-client/1.1") made MCP installs indistinguishable from

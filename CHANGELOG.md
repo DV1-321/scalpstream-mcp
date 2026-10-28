@@ -4,7 +4,7 @@ Releases are the Git tags on this repository. Each is published to the MCP
 registry as `io.github.DV1-321/scalpstream-mcp` and as the
 `ghcr.io/dv1-321/scalpstream-mcp` image.
 
-## Unreleased
+## 0.1.11
 
 ### Added
 

@@ -3,7 +3,7 @@
   "name": "io.github.DV1-321/scalpstream-mcp",
   "title": "ScalpStream Data",
   "description": "Pay-per-call air quality, US product recalls, border waits and cheapest fuel for AI agents via x402.",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "repository": {
     "url": "https://github.com/DV1-321/scalpstream-mcp",
     "source": "github"
@@ -12,7 +12,7 @@
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/dv1-321/scalpstream-mcp:v0.1.10",
+      "identifier": "ghcr.io/dv1-321/scalpstream-mcp:v0.1.11",
       "transport": {
         "type": "stdio"
       },
