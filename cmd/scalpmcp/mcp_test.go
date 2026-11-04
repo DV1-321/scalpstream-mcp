@@ -160,8 +160,8 @@ func TestToolsListShape(t *testing.T) {
 // air_quality is back, served from AirScout's self-hosted data. The count is a
 // literal, not len(expectedTools), so that editing the list alone cannot move it.
 var (
-	expectedTools     = []string{"cheapest_fuel", "air_quality", "border_crossings", "product_recalls", "wash_sale_check", "payment_status"}
-	expectedToolCount = 6
+	expectedTools     = []string{"cheapest_fuel", "air_quality", "border_crossings", "product_recalls", "wash_sale_check", "payment_status", "my_engine_status"}
+	expectedToolCount = 7
 	withdrawnTools    = []string{"options_research", "municipal_income", "crypto_research", "crypto_yields"}
 )
 
@@ -195,8 +195,8 @@ func TestInstructionsNameEveryToolDomainAndNothingElse(t *testing.T) {
 	}
 	args := map[string]any{"country": "US", "region": "CA", "product": "x", "lat": 1.0, "lon": 1.0, "trades": "fid,taxable,2026-08-01,PLTR,buy,100,10"}
 	for _, tl := range newToolset(&client.Client{}, eps).tools {
-		if tl.Local {
-			continue
+		if tl.Local || tl.Direct != nil {
+			continue // local, or its own request to its own origin (my_engine_status)
 		}
 		if !onLive(tl.Preview) {
 			t.Errorf("%s previews from %s, not a live service origin", tl.Name, tl.Preview)
@@ -306,8 +306,9 @@ func TestEveryServiceOriginHasAnEnvOverride(t *testing.T) {
 	t.Setenv("SCALPMCP_BORDER_URL", "http://border.test")
 	t.Setenv("SCALPMCP_RECALL_URL", "http://recall.test/")
 	t.Setenv("SCALPMCP_BASIS_URL", "http://basis.test/")
+	t.Setenv("SCALPMCP_ENGINE_URL", "http://engine.test/")
 	got := endpointsFromEnv()
-	want := endpoints{Fuel: "http://fuel.test", Air: "http://air.test", Border: "http://border.test", Recall: "http://recall.test", Basis: "http://basis.test"}
+	want := endpoints{Fuel: "http://fuel.test", Air: "http://air.test", Border: "http://border.test", Recall: "http://recall.test", Basis: "http://basis.test", Engine: "http://engine.test"}
 	if got != want {
 		t.Errorf("endpointsFromEnv() = %+v, want %+v", got, want)
 	}
@@ -323,7 +324,7 @@ func TestEveryServiceOriginHasAnEnvOverride(t *testing.T) {
 		t.Errorf("wash_sale_check URL = %q (err %v), want it under the override", u, err)
 	}
 	// With nothing set, the defaults stand.
-	for _, name := range []string{"SCALPMCP_FUEL_URL", "SCALPMCP_AIR_URL", "SCALPMCP_BORDER_URL", "SCALPMCP_RECALL_URL", "SCALPMCP_BASIS_URL"} {
+	for _, name := range []string{"SCALPMCP_FUEL_URL", "SCALPMCP_AIR_URL", "SCALPMCP_BORDER_URL", "SCALPMCP_RECALL_URL", "SCALPMCP_BASIS_URL", "SCALPMCP_ENGINE_URL"} {
 		t.Setenv(name, "")
 	}
 	if d := endpointsFromEnv(); d != defaultEndpoints() {
@@ -440,6 +441,13 @@ func TestToolsDeclareAnnotationsAndOutputSchema(t *testing.T) {
 		if tl["name"] == "payment_status" {
 			if ann["idempotentHint"] != true || ann["openWorldHint"] != false {
 				t.Error("payment_status is local and repeatable; it should say so")
+			}
+			continue
+		}
+		if tl["name"] == "my_engine_status" {
+			// Reads the user's own engine over the network and buys nothing.
+			if ann["idempotentHint"] != true || ann["openWorldHint"] != true {
+				t.Error("my_engine_status is repeatable and reaches the enrolment host; it should say so")
 			}
 			continue
 		}

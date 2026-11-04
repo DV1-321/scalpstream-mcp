@@ -12,7 +12,8 @@ $0.01 a call. There is no account to create and no API key
 to obtain.
 
 The tools are `product_recalls`, `border_crossings`, `cheapest_fuel`,
-`air_quality`, `wash_sale_check` and the local `payment_status`. `options_research`,
+`air_quality`, `wash_sale_check`, the local `payment_status` and, for managed-trading
+subscribers with a status token in `SCALPSTREAM_STATUS_TOKEN`, `my_engine_status`. `options_research`,
 `municipal_income`, `crypto_research` and `crypto_yields` have been withdrawn.
 If a listing or an older install still shows one of them, do not call it: it
 answers 410 Gone with `"error": "withdrawn"` and nothing is charged.

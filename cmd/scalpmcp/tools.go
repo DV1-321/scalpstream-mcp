@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
+	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
@@ -32,12 +34,20 @@ type tool struct {
 	BuildURL func(args map[string]any) (string, error)
 	// Local marks a tool that makes no network request and costs nothing.
 	Local bool
+	// Direct marks a tool that makes its own request and pays nothing
+	// (my_engine_status, engine.go): it returns the envelope and the HTTP
+	// status it saw. Idempotent, since nothing is bought.
+	Direct func(ctx context.Context, args map[string]any) (map[string]any, int, error)
 }
 
 type toolset struct {
 	client *client.Client
 	tools  []tool
 	byName map[string]tool
+	// statusToken is where my_engine_status reads the customer's status
+	// token; the environment in production, a stub in tests.
+	statusToken func() string
+	engineHTTP  *http.Client
 	// notOffered maps the name of a tool this server knows but does not offer
 	// to what a caller asking for it is told. Neither tools/list nor dispatch
 	// serves one; see withdrawnNames.
@@ -45,8 +55,10 @@ type toolset struct {
 }
 
 func newToolset(c *client.Client, base endpoints) *toolset {
-	ts := &toolset{client: c, byName: map[string]tool{}, notOffered: map[string]string{}}
+	ts := &toolset{client: c, byName: map[string]tool{}, notOffered: map[string]string{},
+		statusToken: statusTokenFromEnv, engineHTTP: &http.Client{Timeout: engineTimeout}}
 	ts.tools = buildTools(base)
+	ts.tools = append(ts.tools, engineStatusTool(base, func() string { return ts.statusToken() }, ts.engineHTTP, c.UserAgent))
 	for _, t := range ts.tools {
 		ts.byName[t.Name] = t
 	}
@@ -67,6 +79,9 @@ var withdrawnNames = []string{"options_research", "municipal_income", "crypto_re
 // stub instead of the live, money-moving feeds.
 type endpoints struct {
 	Fuel, Air, Border, Recall, Basis string
+	// Engine is the enrolment host that serves a managed-trading customer's
+	// engine status (engine.go); SCALPMCP_ENGINE_URL overrides it.
+	Engine string
 }
 
 func defaultEndpoints() endpoints {
@@ -76,6 +91,7 @@ func defaultEndpoints() endpoints {
 		Border: "https://borderscout.scalpstream.com",
 		Recall: "https://recallscout.scalpstream.com",
 		Basis:  "https://basisscout.scalpstream.com",
+		Engine: "https://enroll.scalpstream.com",
 	}
 }
 
@@ -98,8 +114,9 @@ func (ts *toolset) list() []map[string]any {
 				"destructiveHint": false,
 				// Not idempotent for paid tools: the DATA is stable for a given
 				// query, but each call settles its own payment, so repeating one
-				// is not free and must not be presented as a no-op retry.
-				"idempotentHint": t.Local,
+				// is not free and must not be presented as a no-op retry. A
+				// direct tool buys nothing and may be repeated.
+				"idempotentHint": t.Local || t.Direct != nil,
 				"openWorldHint":  !t.Local,
 			},
 		}
@@ -126,6 +143,9 @@ func (ts *toolset) instructions() string {
 	return "ScalpStream sells small, factual answers per request over the x402 payment protocol " +
 		"(HTTP 402): cheapest fuel, air quality, US border-crossing wait times, US product recalls, and a " +
 		"wash-sale check on the user's own stock trades (US rule, IRC 1091: a calculation, not tax advice). " +
+		"my_engine_status is different: free, and only for a user who subscribes to the ScalpStream managed-trading " +
+		"engine; it reads their own engine's status with the status token in " + statusTokenEnv + " and never " +
+		"asks for that token in chat. " +
 		"Every tool returns JSON. " + mode
 }
 
@@ -202,6 +222,15 @@ func (ts *toolset) dispatch(ctx context.Context, name string, rawArgs json.RawMe
 		if err := json.Unmarshal(rawArgs, &args); err != nil {
 			return "", nil, fmt.Errorf("arguments were not a JSON object: %v", err)
 		}
+	}
+	if t.Direct != nil { // its own request, nothing bought
+		out, status, err := t.Direct(ctx, args)
+		rec.status = status
+		if err != nil {
+			return "", nil, err
+		}
+		rec.complete, _ = out["complete"].(bool)
+		return render(out)
 	}
 	if t.BuildURL == nil { // local tool, no network
 		rec.complete = true
@@ -372,10 +401,13 @@ func argStr(args map[string]any, key string) string {
 func argNum(args map[string]any, key string) (float64, bool) {
 	switch v := args[key].(type) {
 	case float64:
-		return v, true
+		return v, !math.IsNaN(v) && !math.IsInf(v, 0)
 	case string:
+		// ParseFloat accepts "NaN" and "Inf"; neither is a coordinate, a
+		// quantity or a year, and a NaN passes every range check (2026-11-04
+		// review, finding 4), so it would have cost a paid call for nothing.
 		f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
-		return f, err == nil
+		return f, err == nil && !math.IsNaN(f) && !math.IsInf(f, 0)
 	default:
 		return 0, false
 	}
@@ -438,6 +470,25 @@ func requireLatLon(args map[string]any) (string, string, error) {
 		return "", "", fmt.Errorf("lon %g is out of range (-180..180)", lon)
 	}
 	return strconv.FormatFloat(lat, 'f', -1, 64), strconv.FormatFloat(lon, 'f', -1, 64), nil
+}
+
+// tradesName reports whether symbol is one of the FIELDS of trades (rows of
+// comma-separated fields, or a JSON array of objects), not merely a substring:
+// "A" is inside "TAXABLE" and "IRA" inside "trad_ira", and a substring test
+// let the guard above pass for a ticker the trades never name (2026-11-04
+// review, finding 11).
+func tradesName(trades, symbol string) bool {
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	if symbol == "" {
+		return false
+	}
+	isSep := func(r rune) bool { return r == ',' || r == ';' || r == '"' || r == '\'' || r == ':' || r == '[' || r == ']' || r == '{' || r == '}' || r == ' ' || r == '\n' || r == '\r' || r == '\t' }
+	for _, f := range strings.FieldsFunc(trades, isSep) {
+		if strings.ToUpper(f) == symbol {
+			return true
+		}
+	}
+	return false
 }
 
 func numProp(desc string) map[string]any {
@@ -715,7 +766,7 @@ func buildTools(e endpoints) []tool {
 					if symbol == "" {
 						return "", fmt.Errorf("check=%s needs symbol, the ticker the question is about", check)
 					}
-					if !strings.Contains(strings.ToUpper(trades), symbol) {
+					if !tradesName(trades, symbol) {
 						return "", fmt.Errorf("symbol %s does not appear in trades; the check would answer about nothing", symbol)
 					}
 					q.Set("check", check)

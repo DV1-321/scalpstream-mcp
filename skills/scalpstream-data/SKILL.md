@@ -98,7 +98,9 @@ https://basisscout.scalpstream.com/basis?trades=fid,taxable,2026-08-01,PLTR,buy,
 
 The same routes are the MCP tools `product_recalls`, `border_crossings`,
 `cheapest_fuel`, `air_quality` and `wash_sale_check` (plus the local, free
-`payment_status`) in
+`payment_status`, and `my_engine_status` for a ScalpStream managed-trading
+subscriber whose status token is in the server's `SCALPSTREAM_STATUS_TOKEN`:
+their own engine's status, free, a record and never a forecast) in
 `ghcr.io/dv1-321/scalpstream-mcp`. The server validates arguments locally
 before anything is paid, pays from its own configured wallet, and returns one
 envelope: `paid`, `complete`, `source`, `data`, and when nothing was paid

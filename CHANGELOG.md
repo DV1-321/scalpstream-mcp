@@ -4,6 +4,38 @@ Releases are the Git tags on this repository. Each is published to the MCP
 registry as `io.github.DV1-321/scalpstream-mcp` and as the
 `ghcr.io/dv1-321/scalpstream-mcp` image.
 
+## 0.1.12
+
+### Added
+
+- **`my_engine_status`**: for ScalpStream managed-trading subscribers, the
+  status of their OWN engine - running, paused on the plan minimum, halted,
+  crash mode or unarmed and why; equity; realized all-time and over 24 h, 7 d
+  and 30 d; every open position with the bid and what selling into it would
+  net; the last 20 closes; the loss brake; this minute's pass - as the engine
+  itself reports it every minute and the vault serves it with its age. Free,
+  read-only, repeatable; no x402. It needs the subscriber's status token in
+  `SCALPSTREAM_STATUS_TOKEN` (shown once on the enrolment page; it reads one
+  engine's status and can do nothing else). Without it the tool answers with
+  how to subscribe. `SCALPMCP_ENGINE_URL` overrides the origin.
+
+### Fixed
+
+- **The client signs Circle's USDC on Base, Arbitrum or Polygon and nothing
+  else.** 0.1.11 and earlier signed whatever asset, chain and payee the 402
+  named, so a compromised or substituted seller origin could obtain an
+  EIP-3009 authorization from the user's key for an arbitrary token on any EVM
+  chain, with the cap counted in that token's unknown units. An option naming
+  another asset or chain is now skipped unsigned; the refusal says so.
+- A `SCALPMCP_MAX_PRICE_USD` or `SCALPMCP_BUDGET_USD` under one atomic
+  unit (0.000001) used to round to zero and silently become the DEFAULT, which
+  raised a limit set to turn spending off. The server now refuses to start
+  and says why.
+- `NaN` and `Inf` are no longer accepted as coordinates, quantities or
+  years: they passed the range checks and became paid requests for nothing.
+- `wash_sale_check` requires `symbol` to be a field of `trades`, not a
+  substring (`A` matched `TAXABLE`).
+
 ## 0.1.11
 
 ### Added

@@ -27,6 +27,7 @@ you would be buying before deciding to buy it.
 | `air_quality` | Current AQI and pollutants anywhere in the world, an EPA-based verdict on exercising outdoors, and the cleanest window ahead. |
 | `wash_sale_check` | The US wash-sale rule (IRC 1091) applied to the user's **own** trades across taxable, IRA and spouse accounts: would buying or selling a ticker on a date wash a loss, by how much, and the first safe rebuy date; or the whole ledger with adjusted basis and the year's totals. A rule calculation, not tax advice; the service keeps nothing. |
 | `payment_status` | What's configured, what's been spent. Makes no network call and costs nothing. |
+| `my_engine_status` | **ScalpStream managed-trading subscribers only.** Your own engine's status as it reports it every minute: running, paused, halted, crash mode or unarmed and why; equity; what it realized all-time and over 24 h, 7 d, 30 d; open positions with the bid and what selling would net; the last 20 closes. Free, no x402; needs your status token in `SCALPSTREAM_STATUS_TOKEN`. A record of your own ledger, not a forecast. |
 
 Withdrawn tools are listed under
 [Versions](#versions).
@@ -135,7 +136,8 @@ Omit `env` entirely to run in preview-only mode.
 | `EVM_BASE_PRIVATE_KEY` | *(unset)* | Base-mainnet key holding a little USDC. Unset = preview-only. |
 | `SCALPMCP_MAX_PRICE_USD` | `0.10` | Refuse any single call quoted above this. |
 | `SCALPMCP_BUDGET_USD` | `2.00` | Refuse once the process has spent this much in total. |
-| `SCALPMCP_FUEL_URL`, `_AIR_URL`, `_BORDER_URL`, `_RECALL_URL`, `_BASIS_URL` | the live services | Override a service origin, for testing against a stub. |
+| `SCALPMCP_FUEL_URL`, `_AIR_URL`, `_BORDER_URL`, `_RECALL_URL`, `_BASIS_URL`, `_ENGINE_URL` | the live services | Override a service origin, for testing against a stub. |
+| `SCALPSTREAM_STATUS_TOKEN` | *(unset)* | Managed-trading subscribers: the status token from your enrolment page (`st-...`), for `my_engine_status`. It reads your engine's status and can do nothing else; a leaked one shows your positions to whoever holds it, so treat it as private. Forward it to Docker by name (`-e SCALPSTREAM_STATUS_TOKEN`) like the spending key. |
 
 ## Paying without a crypto wallet
 
@@ -259,6 +261,18 @@ the US rule, matched on the same ticker only; it is not tax advice and never
 computes tax owed. The trades travel in the request and the service processes
 them in memory, storing and logging nothing; this server never logs them
 either.
+
+## Your own engine (managed-trading subscribers)
+
+ScalpStream also runs a managed trading engine on a subscriber's own Coinbase
+account (monthly plans at https://www.scalpstream.com/pricing-plans/plans-pricing;
+the key goes into a vault from the enrolment page in the welcome email and the
+operator never sees it). The enrolment page shows a **status token** once. Put
+it in this server's environment as `SCALPSTREAM_STATUS_TOKEN` and ask your
+assistant how your engine is doing: `my_engine_status` returns the engine's
+own minute-by-minute report, served by the vault with its age. The token can
+only read that status - it cannot trade, sign or withdraw - and the server
+never logs it. The same report is on the status page the welcome email names.
 
 ## Versions
 

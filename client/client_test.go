@@ -212,7 +212,7 @@ func TestNonEVMOnlyChallengeIsRefused(t *testing.T) {
 	if !errors.As(err, &pay) {
 		t.Fatalf("want ErrPaymentRequired, got %v", err)
 	}
-	if !strings.Contains(pay.Reason, "EVM") {
+	if !strings.Contains(pay.Reason, "USDC") {
 		t.Errorf("reason = %q, want it to explain the rail mismatch", pay.Reason)
 	}
 }

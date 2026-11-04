@@ -29,10 +29,16 @@
 //	                       so it needs no ETH.
 //	SCALPMCP_MAX_PRICE_USD Per-call ceiling in dollars (default 0.10).
 //	SCALPMCP_BUDGET_USD    Whole-process ceiling in dollars (default 2.00).
-//	SCALPMCP_FUEL_URL, _AIR_URL, _BORDER_URL, _RECALL_URL, _BASIS_URL
+//	SCALPMCP_FUEL_URL, _AIR_URL, _BORDER_URL, _RECALL_URL, _BASIS_URL, _ENGINE_URL
 //	                       Override service origins (testing). One per
 //	                       service; a service with no override cannot be
 //	                       pointed at a stub, so every tool's origin has one.
+//	SCALPSTREAM_STATUS_TOKEN
+//	                       A managed-trading subscriber's status token (from
+//	                       their enrolment page), for my_engine_status. Not a
+//	                       spending key: it reads one engine's status and can
+//	                       do nothing else. Absent = the tool explains how to
+//	                       subscribe.
 package main
 
 import (
@@ -62,7 +68,7 @@ import (
 // the release workflow computed the version and then never passed it to the
 // linker. The workflow now stamps it and refuses to publish a tag that
 // disagrees with this file.
-var buildVersion = "0.1.11"
+var buildVersion = "0.1.12"
 
 // userAgent identifies this program on every outbound request. Without it the
 // Go default ("Go-http-client/1.1") made MCP installs indistinguishable from
@@ -136,6 +142,9 @@ func endpointsFromEnv() endpoints {
 	if v := os.Getenv("SCALPMCP_BASIS_URL"); v != "" {
 		e.Basis = strings.TrimRight(v, "/")
 	}
+	if v := os.Getenv("SCALPMCP_ENGINE_URL"); v != "" {
+		e.Engine = strings.TrimRight(v, "/")
+	}
 	return e
 }
 
@@ -154,10 +163,18 @@ func usdEnv(name string, def *big.Int) *big.Int {
 		return def
 	}
 	atoms := rat.Mul(rat, new(big.Rat).SetInt64(1_000_000))
+	out := atoms.Num()
 	if !atoms.IsInt() {
 		// Sub-cent precision beyond USDC's 6 decimals: round DOWN, so a limit is
 		// never quietly raised above what the user asked for.
-		return new(big.Int).Quo(atoms.Num(), atoms.Denom())
+		out = new(big.Int).Quo(atoms.Num(), atoms.Denom())
 	}
-	return atoms.Num()
+	if out.Sign() <= 0 {
+		// A value under one atomic unit rounded to 0, and the client reads 0
+		// as "use the default" — which RAISED a limit the user set to turn
+		// spending off (2026-11-04 review, finding 2). Refuse to start: a
+		// limit that silently means the opposite protects nothing.
+		log.Fatalf("%s=%q is under one atomic unit of USDC (0.000001): set it to at least 0.000001, or unset it for the default %s atomic units", name, raw, def)
+	}
+	return out
 }

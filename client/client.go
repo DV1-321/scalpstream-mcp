@@ -227,7 +227,17 @@ func (c *Client) FetchResponse(ctx context.Context, url string) (Response, error
 	}
 	opt, chainID, ok := findEVMOption(ch, c.PreferChainID)
 	if !ok {
-		return refused, &ErrPaymentRequired{Resource: url, Reason: "no EVM (eip155) option offered; this client can only pay USDC on an EVM rail"}
+		// Nothing this client will sign for. The seller's terms are still
+		// reported (the first EVM option, for display only) so a caller can
+		// see the price and the asset that was refused.
+		err := &ErrPaymentRequired{Resource: url, Reason: "no option this client will pay: it pays Circle USDC on Base, Arbitrum or Polygon only, and an option naming another asset or chain is refused unsigned"}
+		for _, a := range ch.Accepts {
+			if a.Scheme == "exact" && strings.HasPrefix(a.Network, "eip155:") {
+				err.Quote = quoteOf(a)
+				break
+			}
+		}
+		return refused, err
 	}
 	quote := quoteOf(opt)
 
@@ -466,6 +476,19 @@ func findEVMOption(ch x402.StdChallenge, prefer int64) (x402.StdAccept, int64, b
 		}
 		var chainID int64
 		if _, err := fmt.Sscanf(a.Network, "eip155:%d", &chainID); err != nil {
+			continue
+		}
+		// ONLY CIRCLE'S USDC ON A CHAIN THIS CLIENT KNOWS (2026-11-04 review,
+		// finding 1). The signature this client produces is an EIP-3009
+		// bearer authorization over whatever contract the option names, and
+		// the cap and budget count ATOMIC UNITS with no idea of that token's
+		// decimals: an option naming another asset, or a chain whose USDC
+		// address is not pinned in pay.go, is refused unsigned. Before this,
+		// any party that could answer a seller origin (a compromised host, an
+		// override pointed at a stranger) could obtain a valid authorization
+		// for an arbitrary token on any EVM chain to an arbitrary payee.
+		want, known := pay.USDCFor(chainID)
+		if !known || !strings.EqualFold(strings.TrimSpace(a.Asset), want) {
 			continue
 		}
 		if prefer != 0 {

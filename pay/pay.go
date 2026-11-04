@@ -61,6 +61,24 @@ const (
 	USDCPolygon     = "0x3c499c542cEF5E3811e1192ce70d8cc03d5c3359"
 )
 
+// USDCFor is the USDC contract this client will sign for on chainID, and
+// whether the chain is one it knows at all. The client refuses any option
+// naming another asset or chain (client.findEVMOption): these constants are
+// what makes "we pay USDC" true, so they are checked, not just displayed.
+func USDCFor(chainID int64) (string, bool) {
+	switch chainID {
+	case ChainBase:
+		return USDCBase, true
+	case ChainBaseSepolia:
+		return USDCBaseSepolia, true
+	case ChainArbitrum:
+		return USDCArbitrum, true
+	case ChainPolygon:
+		return USDCPolygon, true
+	}
+	return "", false
+}
+
 // Authorization is the buyer's signed EIP-3009 transferWithAuthorization. A
 // seller never constructs or signs one — it is produced by the buyer's wallet
 // and relayed to the facilitator verbatim.

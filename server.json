@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.DV1-321/scalpstream-mcp",
   "title": "ScalpStream Data",
-  "description": "Pay-per-call air quality, US product recalls, border waits and cheapest fuel for AI agents via x402.",
-  "version": "0.1.11",
+  "description": "Pay-per-call recalls, border waits, fuel, air quality, wash-sale checks via x402; your engine too.",
+  "version": "0.1.12",
   "repository": {
     "url": "https://github.com/DV1-321/scalpstream-mcp",
     "source": "github"
@@ -12,7 +12,7 @@
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/dv1-321/scalpstream-mcp:v0.1.11",
+      "identifier": "ghcr.io/dv1-321/scalpstream-mcp:v0.1.12",
       "transport": {
         "type": "stdio"
       },
@@ -34,6 +34,12 @@
           "description": "Refuse once this process has spent this many dollars in total. Defaults to 2.00.",
           "isRequired": false,
           "isSecret": false
+        },
+        {
+          "name": "SCALPSTREAM_STATUS_TOKEN",
+          "description": "For ScalpStream managed-trading subscribers only: the status token from the enrolment page (st-...), read by my_engine_status. It reads that one engine's status and can do nothing else. Leave unset otherwise.",
+          "isRequired": false,
+          "isSecret": true
         }
       ]
     }

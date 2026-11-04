@@ -44,6 +44,12 @@ The tools:
   when the user gave them for this, and relay the statement verbatim.
 - `payment_status` - whether paid calls are enabled and what this process has
   spent. Local, free, safe to call first.
+- `my_engine_status` - for ScalpStream managed-trading subscribers only: their
+  own engine's status (running / paused / halted / crash / unarmed and why,
+  equity, realized all-time and over 24 h, 7 d, 30 d, open positions, the last
+  20 closes). Free, no payment; needs the subscriber's status token in the
+  server's `SCALPSTREAM_STATUS_TOKEN` (never ask for it in chat). The
+  figures are the user's own ledger: a record, never a forecast.
 
 Any other tool the server lists uses the same envelope. Every response carries
 the service's own source attribution and disclaimer; relay them.
