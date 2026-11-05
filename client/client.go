@@ -63,7 +63,15 @@ type Quote struct {
 
 // maxBody caps a resource read. Feeds return tens of kilobytes; a megabyte is
 // generous and stops a misbehaving or hostile endpoint exhausting memory.
+//
+// A reply past the cap is cut at the cap and SAID to be cut (Response.Truncated).
+// It used to come back as an ordinary success, the cut bytes indistinguishable
+// from a whole body, and the first the caller knew was a JSON parse error -
+// after the payment for it had settled.
 const maxBody = 1 << 20
+
+// MaxBodyBytes is the largest resource body a fetch returns whole.
+const MaxBodyBytes = maxBody
 
 // Client fetches x402-gated resources, paying when it can.
 type Client struct {
@@ -178,6 +186,10 @@ func (c *Client) Unconfirmed() (string, int) {
 // never charged for. Only a 402 triggers the payment path. Callers that need to
 // know which of the two happened use FetchPaid; this form is kept for callers
 // that only want the bytes.
+//
+// The bytes are at most MaxBodyBytes. Neither this form nor FetchPaid can say
+// that a longer reply was cut; a caller that must know (anything that parses
+// the body) uses FetchResponse and reads Truncated.
 func (c *Client) Fetch(ctx context.Context, url string) ([]byte, error) {
 	body, _, err := c.FetchPaid(ctx, url)
 	return body, err
@@ -202,6 +214,40 @@ type Response struct {
 	Body   []byte
 	Paid   bool
 	Status int
+
+	// Truncated reports that the server's reply was longer than MaxBodyBytes
+	// and Body is only its first MaxBodyBytes. A truncated body is not the
+	// resource: do not parse it, and if Paid is set do not fetch again to get
+	// the rest - the payment for this reply has already settled and a second
+	// fetch is a second payment for the same oversized answer.
+	Truncated bool
+
+	// Payment identifies the payment this fetch presented. Set exactly when
+	// Paid is: it is what a caller hands the user when the money moved and the
+	// body turned out to be unusable, so the charge can be found and disputed
+	// rather than repeated.
+	Payment *Payment
+}
+
+// Payment is the reference for one presented payment: the terms this client
+// signed, and the seller's settlement proof when it sent one.
+type Payment struct {
+	Network      string `json:"network"`
+	Asset        string `json:"asset"`
+	AmountAtomic string `json:"amount_atomic"`
+	AmountUSD    string `json:"amount_usd,omitempty"`
+	PayTo        string `json:"pay_to"`
+	// Payer is this client's own address.
+	Payer string `json:"payer"`
+	// AuthorizationNonce is the EIP-3009 nonce this client generated for the
+	// transfer. It is unique to the payment and public on-chain (the token
+	// emits AuthorizationUsed(payer, nonce) when it settles), so it identifies
+	// the payment even when the seller sent no transaction hash.
+	AuthorizationNonce string `json:"authorization_nonce"`
+	// Transaction is the settlement transaction the seller reported in its
+	// PAYMENT-RESPONSE header, when it sent one that looks like a hash. It is
+	// the SELLER's claim, not something this client verified.
+	Transaction string `json:"transaction,omitempty"`
 }
 
 // FetchResponse is FetchPaid, also reporting the last HTTP status seen. The
@@ -214,7 +260,7 @@ func (c *Client) FetchResponse(ctx context.Context, url string) (Response, error
 	}
 	body, status := resp.body, resp.status
 	if status == http.StatusOK {
-		return Response{Body: body, Status: status}, nil
+		return Response{Body: body, Status: status, Truncated: resp.truncated}, nil
 	}
 	if status != http.StatusPaymentRequired {
 		return Response{Status: status}, fmt.Errorf("x402client: %s: HTTP %d: %s", url, status, snippet(body, 300))
@@ -332,7 +378,59 @@ func (c *Client) FetchResponse(ctx context.Context, url string) (Response, error
 	// Confirmed: move the reservation into settled spend.
 	c.commit(amount)
 	settled = true
-	return Response{Body: paidResp.body, Paid: true, Status: paidResp.status}, nil
+	return Response{
+		Body: paidResp.body, Paid: true, Status: paidResp.status, Truncated: paidResp.truncated,
+		Payment: &Payment{
+			Network: quote.Network, Asset: quote.Asset, AmountAtomic: quote.AmountAtomic, AmountUSD: quote.AmountUSD,
+			PayTo: quote.PayTo, Payer: exact.Authorization.From, AuthorizationNonce: exact.Authorization.Nonce,
+			Transaction: settlementTransaction(paidResp.header),
+		},
+	}, nil
+}
+
+// settlementTransaction reads the transaction the seller reported for a settled
+// payment from PAYMENT-RESPONSE (x402 v2) or X-PAYMENT-RESPONSE (v1): base64 of
+// a JSON object whose "transaction" is the on-chain hash.
+//
+// The value is the seller's and ends up in front of a model, so it is returned
+// only when it has the shape of a hash or signature - 0x-hex or base58, 32 to
+// 128 characters - and is otherwise dropped. A missing or malformed header is
+// not an error: the authorization nonce identifies the payment without it.
+func settlementTransaction(h http.Header) string {
+	for _, name := range []string{x402.HeaderPaymentResponse, x402.HeaderPaymentResponseV1} {
+		v := strings.TrimSpace(h.Get(name))
+		if v == "" || len(v) > 4096 {
+			continue
+		}
+		raw, err := base64.StdEncoding.DecodeString(v)
+		if err != nil {
+			continue
+		}
+		var sr struct {
+			Success     bool   `json:"success"`
+			Transaction string `json:"transaction"`
+		}
+		if json.Unmarshal(raw, &sr) != nil || !sr.Success {
+			continue
+		}
+		if tx := strings.TrimSpace(sr.Transaction); looksLikeTxRef(tx) {
+			return tx
+		}
+	}
+	return ""
+}
+
+func looksLikeTxRef(s string) bool {
+	if len(s) < 32 || len(s) > 128 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z') {
+			return false
+		}
+	}
+	return true
 }
 
 // neverSent reports whether a transport error is one that is CERTAIN to have
@@ -408,6 +506,9 @@ type rawResponse struct {
 	status int
 	body   []byte
 	header http.Header
+	// truncated: the reply was longer than maxBody and body holds the first
+	// maxBody bytes of it.
+	truncated bool
 }
 
 func (c *Client) do(ctx context.Context, url, payment string) (rawResponse, error) {
@@ -431,11 +532,17 @@ func (c *Client) do(ctx context.Context, url, payment string) (rawResponse, erro
 		return rawResponse{}, fmt.Errorf("x402client: %s: %w", url, err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	// One byte past the cap, so a reply of exactly maxBody is whole and anything
+	// longer is known to be cut rather than guessed at.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 	if err != nil {
 		return rawResponse{}, fmt.Errorf("x402client: %s: read: %w", url, err)
 	}
-	return rawResponse{status: resp.StatusCode, body: body, header: resp.Header}, nil
+	truncated := len(body) > maxBody
+	if truncated {
+		body = body[:maxBody]
+	}
+	return rawResponse{status: resp.StatusCode, body: body, header: resp.Header, truncated: truncated}, nil
 }
 
 // decodeChallenge reads the challenge from the PAYMENT-REQUIRED header, falling

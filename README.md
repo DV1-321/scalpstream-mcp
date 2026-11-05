@@ -215,6 +215,13 @@ Real money moves, so the design refuses rather than overspends:
 - **Spend is recorded only when the data is actually delivered.** If a paid
   request then fails, the error says settlement state is unknown rather than
   implying nothing moved — you may need to reconcile against the chain.
+- **A paid reply that cannot be delivered is reported as paid, not as an
+  error.** If the seller answers a paid request with 200 and a body that is
+  not JSON, is empty, or is over the 1 MiB limit, the result says
+  `paid: true, complete: false`, names the reason in `undelivered`, and carries
+  the payment reference in `payment` (the terms signed, the EIP-3009
+  authorization nonce, and the seller's transaction hash when it sent one), so
+  the charge can be found rather than repeated by a retry.
 - **Gas is sponsored by the facilitator**, so the wallet needs USDC and no ETH.
 
 Use a throwaway key funded with a dollar or two. Never one holding balances you

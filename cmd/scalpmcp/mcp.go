@@ -76,9 +76,8 @@ const maxConcurrentCalls = 4
 type server struct {
 	tools *toolset
 
-	mu          sync.Mutex
-	out         *bufio.Writer
-	initialized bool
+	mu  sync.Mutex
+	out *bufio.Writer
 
 	// slots bounds in-flight tool calls; wg lets serve drain them before it
 	// returns, so a closed stdin does not abandon a payment mid-flight.
@@ -87,9 +86,19 @@ type server struct {
 
 	// inflight maps a request id to the cancel func for its tool call, so
 	// notifications/cancelled can actually stop work rather than being noted
-	// and ignored.
+	// and ignored. An id is entered by the READ LOOP, before the call's
+	// goroutine exists (see admit): a call still waiting for a slot is as
+	// cancellable as one that is running.
 	cancelMu sync.Mutex
-	inflight map[string]context.CancelFunc
+	inflight map[string]*admitted
+}
+
+// admitted is one registered tools/call. It is a pointer in the map so a call
+// retires only ITS OWN entry: if a client reuses an id while the earlier call
+// with that id is still winding down, the earlier call must not unregister the
+// later one.
+type admitted struct {
+	cancel context.CancelFunc
 }
 
 func newServer(ts *toolset, w io.Writer) *server {
@@ -97,7 +106,7 @@ func newServer(ts *toolset, w io.Writer) *server {
 		tools:    ts,
 		out:      bufio.NewWriter(w),
 		slots:    make(chan struct{}, maxConcurrentCalls),
-		inflight: make(map[string]context.CancelFunc),
+		inflight: make(map[string]*admitted),
 	}
 }
 
@@ -181,9 +190,13 @@ func (s *server) handle(req *rpcRequest) {
 	case "initialize":
 		s.handleInitialize(req)
 	case "notifications/initialized":
-		s.mu.Lock()
-		s.initialized = true
-		s.mu.Unlock()
+		// Accepted and deliberately not acted on. This server keeps no
+		// per-session state that the notification would unlock: tools/list and
+		// tools/call are served whether or not it arrived, because refusing
+		// them would break a client that skips it and protect nothing (the
+		// spending limits live in the client, not in the handshake). A flag
+		// was once set here and read nowhere; it is gone rather than left to
+		// suggest a gate that does not exist.
 	case "ping":
 		// Ping is allowed before initialization and answers with an empty object.
 		if !isNotification {
@@ -197,12 +210,34 @@ func (s *server) handle(req *rpcRequest) {
 		if !isNotification {
 			// Dispatched off the read loop so a slow paid fetch cannot stall
 			// ping, tools/list, or a cancellation aimed at itself.
+			//
+			// The call is made cancellable HERE, on the read loop, before its
+			// goroutine starts. Registration used to happen inside the
+			// goroutine, after it had a slot, so with four calls running a
+			// fifth sat in the queue unregistered: a notifications/cancelled
+			// for it found nothing, was dropped, and the call ran - and paid -
+			// when a slot came free. Messages are read in order, so once admit
+			// has returned every later cancellation for this id finds it.
+			ctx, done := s.admit(req.ID)
 			s.wg.Add(1)
 			go func() {
 				defer s.wg.Done()
-				s.slots <- struct{}{}
+				defer done()
+				select {
+				case s.slots <- struct{}{}:
+				case <-ctx.Done():
+					s.dropCancelled()
+					return
+				}
 				defer func() { <-s.slots }()
-				s.handleToolCall(req)
+				// A slot and the cancellation can both be ready, and select
+				// picks either: a withdrawn request must not run because the
+				// slot happened to win.
+				if ctx.Err() != nil {
+					s.dropCancelled()
+					return
+				}
+				s.handleToolCall(ctx, req)
 			}()
 		}
 	case "notifications/cancelled":
@@ -266,43 +301,67 @@ type cancelledParams struct {
 	Reason    string          `json:"reason,omitempty"`
 }
 
-// handleCancelled stops the tool call for the named request, if it is still
-// running. A cancellation for an unknown or finished id is ignored, which is
-// the correct outcome and not an error worth reporting — the notification and
-// the result can always race.
+// handleCancelled stops the tool call for the named request, whether it is
+// running or still queued for a slot (a queued call then never starts). A
+// cancellation for an unknown or finished id is ignored, which is the correct
+// outcome and not an error worth reporting — the notification and the result
+// can always race.
 func (s *server) handleCancelled(req *rpcRequest) {
 	var p cancelledParams
 	if err := json.Unmarshal(req.Params, &p); err != nil || len(p.RequestID) == 0 {
 		return
 	}
 	s.cancelMu.Lock()
-	cancel, ok := s.inflight[string(p.RequestID)]
+	call, ok := s.inflight[string(p.RequestID)]
 	s.cancelMu.Unlock()
 	if ok {
+		call.cancel()
+	}
+}
+
+// admit registers a tools/call as cancellable and returns its context and the
+// func that retires it. It runs on the read loop, so it has returned before
+// the next message - which may be the cancellation - is read.
+//
+// The context carries NO deadline. callTimeout is applied in handleToolCall,
+// once the call has a slot: time spent queued behind other calls must not eat
+// into the time a paid fetch is given to finish.
+func (s *server) admit(id json.RawMessage) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	key, call := string(id), &admitted{cancel: cancel}
+	s.cancelMu.Lock()
+	s.inflight[key] = call
+	s.cancelMu.Unlock()
+	return ctx, func() {
+		s.cancelMu.Lock()
+		if s.inflight[key] == call {
+			delete(s.inflight, key)
+		}
+		s.cancelMu.Unlock()
 		cancel()
 	}
 }
 
-func (s *server) handleToolCall(req *rpcRequest) {
+// dropCancelled is the whole handling of a call cancelled before it started:
+// it never runs, so no request is made and nothing is paid, and it is not
+// answered - the spec asks a receiver not to respond to a cancelled request,
+// and the client has stopped waiting for this id. One stderr line records it;
+// the request is not parsed, so the line carries nothing of the caller's.
+func (s *server) dropCancelled() {
+	log.Print("call cancelled while queued: not started, nothing requested or paid")
+}
+
+// handleToolCall runs one admitted call. ctx is the call's own (admit): it is
+// cancelled by notifications/cancelled for this id.
+func (s *server) handleToolCall(ctx context.Context, req *rpcRequest) {
 	var p toolCallParams
 	if err := json.Unmarshal(req.Params, &p); err != nil {
 		s.writeError(req.ID, codeInvalidRequest, "invalid tools/call params", err.Error())
 		return
 	}
 
-	// Register the cancel func BEFORE the call starts, so a cancellation that
-	// arrives immediately still finds it.
-	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+	ctx, cancel := context.WithTimeout(ctx, callTimeout)
 	defer cancel()
-	key := string(req.ID)
-	s.cancelMu.Lock()
-	s.inflight[key] = cancel
-	s.cancelMu.Unlock()
-	defer func() {
-		s.cancelMu.Lock()
-		delete(s.inflight, key)
-		s.cancelMu.Unlock()
-	}()
 
 	text, structured, err := s.tools.call(ctx, p.Name, p.Arguments)
 	if err != nil {

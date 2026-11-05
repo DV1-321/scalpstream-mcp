@@ -106,7 +106,10 @@ before anything is paid, pays from its own configured wallet, and returns one
 envelope: `paid`, `complete`, `source`, `data`, and when nothing was paid
 `reason`, `price` and `howto`. With no wallet configured every paid tool
 returns the free preview and the exact quote; that is the designed default,
-not a failure.
+not a failure. `paid: true` with `complete: false` means the call was charged
+and the reply could not be delivered (`undelivered` says why, `payment`
+identifies the charge): report it, and do not call again to get the data,
+because every call settles its own payment.
 
 ## Refusal codes
 
