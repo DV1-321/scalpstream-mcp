@@ -22,6 +22,13 @@ const (
 
 	// HeaderPaymentReceipt carries base64(JSON) proof of settlement on the 200.
 	HeaderPaymentReceipt = "X-Payment-Receipt"
+
+	// HeaderPaymentResponse carries base64(JSON) of the standard x402 v2
+	// settlement envelope on a settled 200: {"success":true,"transaction":
+	// "<hash>","network":"eip155:8453","payer":"0x..."}. HeaderPaymentResponseV1
+	// is its v1 name and carries the same value.
+	HeaderPaymentResponse   = "PAYMENT-RESPONSE"
+	HeaderPaymentResponseV1 = "X-PAYMENT-RESPONSE"
 )
 
 // StdChallenge is the x402 v2 "Payment Required" envelope.

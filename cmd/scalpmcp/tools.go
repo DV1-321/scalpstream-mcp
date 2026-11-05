@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/DV1-321/scalpstream-mcp/client"
 )
@@ -244,20 +246,28 @@ func (ts *toolset) dispatch(ctx context.Context, name string, rawArgs json.RawMe
 	resp, err := ts.client.FetchResponse(ctx, target)
 	rec.status = resp.Status
 	if err == nil {
-		paid, body := resp.Paid, resp.Body
-		rec.paid, rec.complete = paid, true
-		out := map[string]any{
-			"paid":     paid,
-			"source":   target,
-			"complete": true,
-			"data":     json.RawMessage(body),
-		}
-		if !paid {
+		paid := resp.Paid
+		out := map[string]any{"paid": paid, "source": target}
+		delivered := attachBody(out, resp.Body, resp.Truncated)
+		out["complete"] = delivered
+		rec.paid, rec.complete = paid, delivered
+		switch {
+		case paid && !delivered:
+			// The money has moved and there is nothing to show for it. This is a
+			// RESULT, not an error, and it says so in every field a caller might
+			// read: an error here reads as "it failed, try again", and trying
+			// again is a second payment for the same unusable reply.
+			out["payment"] = resp.Payment
+			out["note"] = paidUndeliveredNote
+		case !paid && delivered:
 			// The server answered the unpaid request with 200: a mirror, a
 			// cache, or a feed with its gate down. The data is whatever it
 			// served, and no money moved — saying paid:true here would have
 			// the model report a charge that payment_status cannot show.
 			out["note"] = "The resource was served without a payment challenge, so nothing was charged."
+		case !paid && !delivered:
+			out["note"] = "The resource was served without a payment challenge, so nothing was charged; " +
+				"its reply could not be returned as data (see undelivered)."
 		}
 		return render(out)
 	}
@@ -276,15 +286,58 @@ func (ts *toolset) dispatch(ctx context.Context, name string, rawArgs json.RawMe
 			"howto":    howToEnable,
 			"note":     "This is the FREE PREVIEW, not the paid dataset. The paid call returns the full result described by this tool.",
 		}
-		preview, perr := ts.client.Fetch(ctx, t.Preview)
+		preview, perr := ts.client.FetchResponse(ctx, t.Preview)
 		if perr == nil {
-			out["data"] = json.RawMessage(preview)
+			attachBody(out, preview.Body, preview.Truncated)
 		} else {
 			out["error"] = perr.Error()
 		}
 		return render(out)
 	}
 	return "", nil, err
+}
+
+// paidUndeliveredNote is what a caller reads when a call was paid for and the
+// seller's reply could not be handed over. It is written for a model that is
+// about to decide whether to call the tool again.
+const paidUndeliveredNote = "PAID, NOT DELIVERED. The payment for this call settled (paid=true; `payment` identifies it) " +
+	"and the seller answered 200, but its reply could not be returned as data; `undelivered` says why. " +
+	"Do NOT call this tool again to get the result: every call settles its own payment, and the same request " +
+	"is likely to get the same reply. Tell the user that the call was charged and returned nothing usable, " +
+	"and give them the payment reference; payment_status shows the charge."
+
+// attachBody puts a fetched 200 body into the envelope and reports whether it
+// went in as `data`.
+//
+// A body is `data` only when it is the whole reply and valid JSON. The envelope
+// used to wrap whatever bytes arrived in json.RawMessage, so a reply cut at the
+// client's size cap, or an HTML error page behind a 200, failed inside render
+// as "encoding the result" - an error naming neither the cause nor, when the
+// call had been paid for, the fact that the money had already moved.
+//
+// What could not be delivered is named in `undelivered`. A reply that is whole
+// and merely not JSON is still the caller's (they may have paid for it), so it
+// is passed on verbatim as `data_text` when it is text.
+func attachBody(out map[string]any, body []byte, truncated bool) bool {
+	switch {
+	case truncated:
+		out["undelivered"] = fmt.Sprintf("The reply was larger than this client's %d-byte limit and was cut off, "+
+			"so it is not valid JSON and is not returned.", client.MaxBodyBytes)
+		return false
+	case len(bytes.TrimSpace(body)) == 0:
+		out["undelivered"] = "The reply was empty."
+		return false
+	case json.Valid(body):
+		out["data"] = json.RawMessage(body)
+		return true
+	case utf8.Valid(body):
+		out["undelivered"] = "The reply was not JSON. It is returned unparsed in data_text."
+		out["data_text"] = string(body)
+		return false
+	default:
+		out["undelivered"] = fmt.Sprintf("The reply was %d bytes of binary data, not JSON, and is not returned.", len(body))
+		return false
+	}
 }
 
 // render turns one value into the text block and the structured object that
@@ -316,11 +369,27 @@ func envelopeSchema(dataDescription string) map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"paid":     map[string]any{"type": "boolean", "description": "Whether this result was paid for. False means the free preview."},
-			"complete": map[string]any{"type": "boolean", "description": "Whether `data` is the full dataset this tool describes."},
-			"source":   map[string]any{"type": "string", "description": "The exact URL the data came from."},
-			"data":     map[string]any{"type": "object", "description": dataDescription},
-			"reason":   map[string]any{"type": "string", "description": "Present when paid=false: why payment did not happen."},
+			"paid":        map[string]any{"type": "boolean", "description": "Whether this result was paid for. False means the free preview."},
+			"complete":    map[string]any{"type": "boolean", "description": "Whether `data` is the full dataset this tool describes. False with paid=true means the payment settled and the reply could not be delivered: read `undelivered` and `payment`, and do not call again."},
+			"source":      map[string]any{"type": "string", "description": "The exact URL the data came from."},
+			"data":        map[string]any{"type": "object", "description": dataDescription},
+			"undelivered": map[string]any{"type": "string", "description": "Present when the service answered but its reply could not be returned as `data`: why (over the size limit, not JSON, empty)."},
+			"data_text":   map[string]any{"type": "string", "description": "Present with `undelivered` when the reply was text but not JSON: the reply, unparsed."},
+			"payment": map[string]any{
+				"type":        "object",
+				"description": "Present when paid=true and complete=false: the reference for the payment that settled.",
+				"properties": map[string]any{
+					"network":             map[string]any{"type": "string"},
+					"asset":               map[string]any{"type": "string"},
+					"amount_atomic":       map[string]any{"type": "string"},
+					"amount_usd":          map[string]any{"type": "string"},
+					"pay_to":              map[string]any{"type": "string"},
+					"payer":               map[string]any{"type": "string"},
+					"authorization_nonce": map[string]any{"type": "string", "description": "The EIP-3009 nonce of the transfer; unique to this payment and visible on-chain."},
+					"transaction":         map[string]any{"type": "string", "description": "The settlement transaction, as the seller reported it."},
+				},
+			},
+			"reason": map[string]any{"type": "string", "description": "Present when paid=false: why payment did not happen."},
 			"price": map[string]any{
 				"type":        "object",
 				"description": "Present when paid=false: the seller's quoted terms.",

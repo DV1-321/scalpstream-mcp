@@ -16,11 +16,17 @@ One JSON envelope, for every tool:
 | `source` | The exact URL the data came from (`local` for `payment_status`). |
 | `data` | The dataset or the preview. |
 | `reason`, `price`, `howto` | Present when `paid` is false: why no payment happened, the seller's exact quote (`amount_usd`, `network`, `asset`, `pay_to`), and how paid calls are enabled. |
+| `undelivered`, `data_text`, `payment` | Present when the service answered but its reply could not be returned as `data`: why (over the 1 MiB limit, not JSON, empty), the reply as text when it was text, and, when `paid` is true, the reference of the payment that settled. |
 
 `complete` is the field to branch on. A result with `paid: false, complete: false`
 and a `price` is the designed outcome in preview-only mode, not an error: it
 shows what the data looks like and what one call would cost (about $0.01 in
 USDC on Base).
+
+A result with `paid: true, complete: false` means the call WAS charged and the
+reply could not be delivered. Do not call the tool again to get the data: each
+call settles its own payment. Tell the user it was charged and returned nothing
+usable, and give them `undelivered` and `payment`.
 
 The tools:
 
