@@ -29,6 +29,14 @@ you would be buying before deciding to buy it.
 | `payment_status` | What's configured, what's been spent. Makes no network call and costs nothing. |
 | `my_engine_status` | **ScalpStream managed-trading subscribers only.** Your own engine's status as it reports it every minute: running, paused, halted, crash mode or unarmed and why; equity; what it realized all-time and over 24 h, 7 d, 30 d; open positions with the bid and what selling would net; the last 20 closes. Free, no x402; needs your status token in `SCALPSTREAM_STATUS_TOKEN`. A record of your own ledger, not a forecast. |
 
+Each paid tool calls one ScalpStream service, and every service has its own
+page with a free preview and an OpenAPI document:
+[RecallScout](https://recallscout.scalpstream.com/) (`product_recalls`),
+[BorderScout](https://borderscout.scalpstream.com/) (`border_crossings`),
+[FuelScout](https://fuelscout.scalpstream.com/) (`cheapest_fuel`),
+[AirScout](https://airscout.scalpstream.com/) (`air_quality`) and
+[BasisScout](https://basisscout.scalpstream.com/) (`wash_sale_check`).
+
 Withdrawn tools are listed under
 [Versions](#versions).
 
@@ -84,7 +92,7 @@ command line:
 }
 ```
 
-Each release is also tagged (`:v0.1.9` and so on) for installs that want to pin
+Each release is also tagged (`:v0.1.12` and so on) for installs that want to pin
 one; the MCP registry entry pins the exact tag.
 
 Claude Code can also take it as a plugin, which installs the same Docker
@@ -151,6 +159,8 @@ account:
 | Fuel prices | <https://mcp.apify.com?tools=rolescout/fuelscout-cheapest-fuel-prices> |
 | US border waits | <https://mcp.apify.com?tools=rolescout/borderscout-us-border-wait-times> |
 | US product recalls | <https://mcp.apify.com?tools=rolescout/recallscout-us-product-recalls> |
+| Air quality | <https://mcp.apify.com?tools=rolescout/airscout-air-quality-aqi> |
+| Wash-sale check | <https://mcp.apify.com?tools=rolescout/basisscout-wash-sale-checker> |
 
 Those links authenticate with your Apify account; this server has no part in
 them and never needs your Apify token.
