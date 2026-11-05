@@ -4,6 +4,27 @@ Releases are the Git tags on this repository. Each is published to the MCP
 registry as `io.github.DV1-321/scalpstream-mcp` and as the
 `ghcr.io/dv1-321/scalpstream-mcp` image.
 
+## 0.1.13
+
+### Security
+
+- Built with Go 1.26.10. The 0.1.12 image was built with Go 1.26.9, which carries
+  GO-2026-6809 / CVE-2026-111943 (crypto/x509), reachable from every outbound TLS
+  fetch this server makes. Upgrade from any earlier image.
+
+### Fixed
+
+- A paid reply that cannot be delivered is no longer reported as a generic
+  encoding error after the money moved. A 200 whose body is not JSON, is empty or
+  is over the 1 MiB cap now returns a normal result with `complete: false`, the
+  reason in `undelivered`, and, when the call was paid, `paid: true` with the
+  payment reference (network, amount, payee, payer, authorization nonce and the
+  seller's transaction when it sent one) and a note not to call again.
+- A `tools/call` cancelled while it is still queued never runs. The cancel used
+  to be lost because the call was registered only once it held a slot.
+- Removed the unused `initialized` flag: the server serves `tools/list` and
+  `tools/call` with or without the notification, and a test now says so.
+
 ## 0.1.12
 
 ### Added

@@ -3,7 +3,7 @@
   "name": "io.github.DV1-321/scalpstream-mcp",
   "title": "ScalpStream Data",
   "description": "Pay-per-call recalls, border waits, fuel, air quality, wash-sale checks via x402; your engine too.",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "repository": {
     "url": "https://github.com/DV1-321/scalpstream-mcp",
     "source": "github"
@@ -12,7 +12,7 @@
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/dv1-321/scalpstream-mcp:v0.1.12",
+      "identifier": "ghcr.io/dv1-321/scalpstream-mcp:v0.1.13",
       "transport": {
         "type": "stdio"
       },
