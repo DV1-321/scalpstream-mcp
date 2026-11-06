@@ -92,7 +92,7 @@ command line:
 }
 ```
 
-Each release is also tagged (`:v0.1.12` and so on) for installs that want to pin
+Each release is also tagged (`:v0.1.13` and so on) for installs that want to pin
 one; the MCP registry entry pins the exact tag.
 
 Claude Code can also take it as a plugin, which installs the same Docker
