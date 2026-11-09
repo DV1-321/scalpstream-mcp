@@ -3,8 +3,10 @@ package client_test
 // Sweep 2026-11-08, finding G-5. The EIP-712 domain name and version were taken
 // from the seller's 402. A wrong domain cannot steal funds, because the token
 // rejects the signature, but it comes back as 402-after-payment, which the
-// client holds against the budget as unconfirmed: a hostile or broken seller
-// could burn a whole session budget at $0.01 a call without moving any money.
+// client holds against the budget as unconfirmed: a broken seller could burn a
+// whole session budget at $0.01 a call without moving any money. Pinning stops
+// that. It does not stop a seller that refuses a correct signature, which is
+// held on purpose: see TestASellerRefusingACorrectSignatureIsStillHeld.
 
 import (
 	"context"
@@ -16,6 +18,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/DV1-321/scalpstream-mcp/client"
@@ -48,6 +51,88 @@ func TestADomainThatIsNotUSDCsIsRefusedUnsigned(t *testing.T) {
 				t.Errorf("held %s over %d calls, want nothing", held, n)
 			}
 		})
+	}
+}
+
+const usdcOnSepolia = `"scheme":"exact","network":"eip155:84532","amount":"10000","asset":"0x036CbD53842c5426634e7929541eC2318f3dCF7e","payTo":"0x1111111111111111111111111111111111111111"`
+
+// refusesEverything answers 402 to every request, signed or not, and counts the
+// signatures it was shown.
+func refusesEverything(t *testing.T, accept string) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var signatures atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("PAYMENT-SIGNATURE") != "" {
+			signatures.Add(1)
+		}
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{"x402Version":2,"accepts":[` + accept + `]}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &signatures
+}
+
+// Base Sepolia's domain is not pinned, so a seller naming it could still burn
+// the budget through its own name and version, and a mainnet session has no use
+// for testnet tokens. It is refused unless the caller asks for that chain.
+func TestATestnetOptionIsRefusedUnsignedByDefault(t *testing.T) {
+	srv, signatures := refusesEverything(t, `{`+usdcOnSepolia+`,"extra":{"name":"Not USDC","version":"9"}}`)
+	c := &client.Client{Signer: testSigner(t), Budget: big.NewInt(30000)}
+	for i := 0; i < 5; i++ {
+		_, err := c.Fetch(context.Background(), srv.URL)
+		var refused *client.ErrPaymentRequired
+		if !errors.As(err, &refused) {
+			t.Fatalf("call %d: want ErrPaymentRequired, got %v", i, err)
+		}
+		if strings.Contains(refused.Reason, "budget") {
+			t.Errorf("call %d: refused for the budget, so earlier calls held it: %s", i, refused.Reason)
+		}
+	}
+	if n := signatures.Load(); n != 0 {
+		t.Errorf("%d signature(s) presented for a testnet option", n)
+	}
+	if held, n := c.Unconfirmed(); held != "0" || n != 0 {
+		t.Errorf("held %s over %d calls, want nothing", held, n)
+	}
+}
+
+// Listing the testnet first used to win over a mainnet option offered after it.
+func TestAMainnetOptionIsPaidWhenATestnetOneIsListedFirst(t *testing.T) {
+	srv, paid := hostileSeller(t, `{`+usdcOnSepolia+`},{`+usdcOnBase+`}`)
+	c := &client.Client{Signer: testSigner(t)}
+	res, err := c.FetchResponse(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paid.Load() != 1 || res.Payment == nil || res.Payment.Network != "eip155:8453" {
+		t.Errorf("paid %d time(s), payment %+v, want one payment on Base", paid.Load(), res.Payment)
+	}
+}
+
+// A caller that names the testnet still gets it.
+func TestATestnetOptionIsPaidWhenAskedFor(t *testing.T) {
+	srv, paid := hostileSeller(t, `{`+usdcOnSepolia+`,"extra":{"name":"USD Coin","version":"2"}}`)
+	c := &client.Client{Signer: testSigner(t), PreferChainID: 84532}
+	res, err := c.FetchResponse(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paid.Load() != 1 || res.Payment == nil || res.Payment.Network != "eip155:84532" {
+		t.Errorf("paid %d time(s), payment %+v, want one payment on the testnet", paid.Load(), res.Payment)
+	}
+}
+
+// The limit of the pin, stated so nobody takes it for more. A 402 after a correct
+// signature cannot be told from a seller that settled and then failed, so it
+// stays held; the session budget is what bounds it.
+func TestASellerRefusingACorrectSignatureIsStillHeld(t *testing.T) {
+	srv, signatures := refusesEverything(t, `{`+usdcOnBase+`,"extra":{"name":"USD Coin","version":"2"}}`)
+	c := &client.Client{Signer: testSigner(t)}
+	if _, err := c.Fetch(context.Background(), srv.URL); err == nil {
+		t.Fatal("a 402 after payment returned no error")
+	}
+	if held, n := c.Unconfirmed(); signatures.Load() != 1 || held != "10000" || n != 1 {
+		t.Errorf("signatures %d, held %s over %d calls, want 1, 10000 and 1", signatures.Load(), held, n)
 	}
 }
 

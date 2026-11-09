@@ -101,7 +101,8 @@ type Client struct {
 
 	// PreferChainID picks which EVM rail to pay on when a resource offers
 	// several, by EIP-155 chain id (8453 Base, 42161 Arbitrum One, 137 Polygon).
-	// Zero keeps the default preference: Base, then whatever else is offered.
+	// Zero keeps the default preference: Base, then Arbitrum or Polygon. Base
+	// Sepolia (84532) is paid only when named here; the scalpmcp binary never does.
 	//
 	// A seller can advertise a rail it has never actually been paid on — the
 	// challenge is signed and the facilitator will simulate it happily — so
@@ -332,7 +333,7 @@ func (c *Client) FetchResponse(ctx context.Context, url string) (Response, error
 	}()
 
 	domain, pinned := pay.USDCDomain(chainID)
-	if !pinned { // the testnet only: findEVMOption refuses any other unknown chain
+	if !pinned { // the testnet, only when PreferChainID names it: findEVMOption refuses the rest
 		name, _ := opt.Extra["name"].(string)
 		version, _ := opt.Extra["version"].(string)
 		domain = pay.TokenDomain{Name: name, Version: version, ChainID: chainID, Contract: opt.Asset}
@@ -645,13 +646,20 @@ func findEVMOption(ch x402.StdChallenge, prefer int64) (x402.StdAccept, int64, b
 		if d, pinned := pay.USDCDomain(chainID); pinned && !extraAgrees(a.Extra, d) {
 			continue
 		}
+		// The testnet is opt-in. Its domain is not pinned, so an option naming it
+		// could reintroduce that same budget burn through the seller's own name
+		// and version, and it could outrank a real rail offered after it. A
+		// mainnet session has no use for test tokens.
+		if chainID == pay.ChainBaseSepolia && prefer != chainID {
+			continue
+		}
 		if prefer != 0 {
 			if chainID == prefer {
 				return a, chainID, true
 			}
 			continue
 		}
-		if chainID == 8453 || chainID == 84532 {
+		if chainID == pay.ChainBase {
 			return a, chainID, true
 		}
 		if fallbackChain == 0 {

@@ -83,7 +83,9 @@ func USDCFor(chainID int64) (string, bool) {
 // The three mainnet contracts report name "USD Coin", version "2" and reproduce
 // the separators above, so the client signs over these whatever a seller's 402
 // says. Base Sepolia is not pinned: this repo has never read that contract, and
-// a guess could only break testnet payments, so there the seller's values stand.
+// a guess could only break testnet payments. The client pays it only when the
+// caller names that chain (Client.PreferChainID), and then the seller's values
+// stand.
 func USDCDomain(chainID int64) (TokenDomain, bool) {
 	switch chainID {
 	case ChainBase, ChainArbitrum, ChainPolygon:

@@ -19,7 +19,12 @@ registry as `io.github.DV1-321/scalpstream-mcp` and as the
 - The EIP-712 domain of USDC is pinned on Base, Arbitrum and Polygon. It was taken
   from the seller's 402, and a wrong one could hold the session budget as
   unconfirmed with no money moving. An option naming another domain is refused
-  unsigned.
+  unsigned. A seller that refuses a correct signature is still held against the
+  budget, because that cannot be told from one that settled and then failed.
+- Base Sepolia is no longer paid by default. Its domain is not pinned, so an
+  option naming it could hold the budget the same way, and listing it first
+  outranked a real rail. It is paid only when `Client.PreferChainID` names it,
+  which the `scalpmcp` binary never does.
 - `my_engine_status` sends the status token only over https or to this machine,
   and does not follow redirects. An override outside `*.scalpstream.com` is warned
   about at start.
