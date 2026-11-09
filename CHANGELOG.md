@@ -4,6 +4,34 @@ Releases are the Git tags on this repository. Each is published to the MCP
 registry as `io.github.DV1-321/scalpstream-mcp` and as the
 `ghcr.io/dv1-321/scalpstream-mcp` image.
 
+## 0.1.14
+
+### Security
+
+- A free preview is never paid for. When a paid call was refused the preview was
+  fetched through the paying client, so a `/preview` answering 402 under the cap
+  was signed and paid and still reported `paid: false`. A preview that asks for
+  payment is now refused and the result carries the price only.
+- `SCALPMCP_MAX_PRICE_USD=0` or `SCALPMCP_BUDGET_USD=0` now means spend nothing.
+  Both used to become the default, so a user turning spending off with a key set
+  got a $2.00 budget. Paid tools return the preview and the price, even for a
+  quote of zero. A negative or unreadable value now stops the server.
+- The EIP-712 domain of USDC is pinned on Base, Arbitrum and Polygon. It was taken
+  from the seller's 402, and a wrong one could hold the session budget as
+  unconfirmed with no money moving. An option naming another domain is refused
+  unsigned.
+- `my_engine_status` sends the status token only over https or to this machine,
+  and does not follow redirects. An override outside `*.scalpstream.com` is warned
+  about at start.
+
+### Fixed
+
+- `air_quality`, `border_crossings` and `product_recalls` refuse an out-of-range
+  or unreadable number before any request: `hours` 1-168, `duration` 1-12 and no
+  more than `hours`, `radius` 0 or more, `limit` 1-100, `year` 1900-2100. These
+  used to be sent on or dropped silently. A fractional `radius` is no longer cut
+  to a whole number.
+
 ## 0.1.13
 
 ### Security

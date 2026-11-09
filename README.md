@@ -92,7 +92,7 @@ command line:
 }
 ```
 
-Each release is also tagged (`:v0.1.13` and so on) for installs that want to pin
+Each release is also tagged (`:v0.1.14` and so on) for installs that want to pin
 one; the MCP registry entry pins the exact tag.
 
 Claude Code can also take it as a plugin, which installs the same Docker
@@ -142,9 +142,9 @@ Omit `env` entirely to run in preview-only mode.
 | Variable | Default | Meaning |
 |---|---|---|
 | `EVM_BASE_PRIVATE_KEY` | *(unset)* | Base-mainnet key holding a little USDC. Unset = preview-only. |
-| `SCALPMCP_MAX_PRICE_USD` | `0.10` | Refuse any single call quoted above this. |
-| `SCALPMCP_BUDGET_USD` | `2.00` | Refuse once the process has spent this much in total. |
-| `SCALPMCP_FUEL_URL`, `_AIR_URL`, `_BORDER_URL`, `_RECALL_URL`, `_BASIS_URL`, `_ENGINE_URL` | the live services | Override a service origin, for testing against a stub. |
+| `SCALPMCP_MAX_PRICE_USD` | `0.10` | Refuse any single call quoted above this. `0` turns spending off, even with a key set. A negative or unreadable value stops the server. |
+| `SCALPMCP_BUDGET_USD` | `2.00` | Refuse once the process has spent this much in total. `0` turns spending off, even with a key set. A negative or unreadable value stops the server. |
+| `SCALPMCP_FUEL_URL`, `_AIR_URL`, `_BORDER_URL`, `_RECALL_URL`, `_BASIS_URL`, `_ENGINE_URL` | the live services | Override a service origin, for testing against a stub. `_ENGINE_URL` must be https or this machine, or `my_engine_status` refuses to send the status token. |
 | `SCALPSTREAM_STATUS_TOKEN` | *(unset)* | Managed-trading subscribers: the status token from your enrolment page (`st-...`), for `my_engine_status`. It reads your engine's status and can do nothing else; a leaked one shows your positions to whoever holds it, so treat it as private. Forward it to Docker by name (`-e SCALPSTREAM_STATUS_TOKEN`) like the spending key. |
 
 ## Paying without a crypto wallet

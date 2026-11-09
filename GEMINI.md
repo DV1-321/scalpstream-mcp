@@ -75,7 +75,8 @@ the service's own source attribution and disclaimer; relay them.
   about. Gas is sponsored, so it needs no ETH.
 - **Spend only inside the limits the user set.** `SCALPMCP_MAX_PRICE_USD`
   (default 0.10 per call) and `SCALPMCP_BUDGET_USD` (default 2.00 per process)
-  are checked before anything is signed. A refusal costs nothing. Never suggest
+  are checked before anything is signed. A refusal costs nothing, and 0 in either
+  one means the user has turned spending off, key or no key. Never suggest
   raising them to get past a refusal; report the refusal and let the user
   decide.
 - Paid tools are not idempotent: each call settles its own payment, so do not

@@ -140,6 +140,8 @@ Tell the user plainly:
 - `SCALPMCP_MAX_PRICE_USD` caps any single call and `SCALPMCP_BUDGET_USD` caps
   the whole process. Both are checked before anything is signed, so a refusal
   costs nothing. Leaving them unset means the defaults above, never unlimited.
+  Setting either to 0 turns spending off even with a key set; a negative or
+  unreadable value stops the server.
 - Never paste the key into a chat, a committed file, or a shell command — a
   command line is readable by other processes. Put it in the MCP client's `env`
   block only.

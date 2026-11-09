@@ -133,8 +133,10 @@ accepted again. Switch on the text before the first `:`. Codes are stable.
 
 The MCP server adds its own `reason` text when it did not pay at all: no
 spending key configured, the quote exceeds `SCALPMCP_MAX_PRICE_USD`, or the
-process budget `SCALPMCP_BUDGET_USD` is spent. These are checked before
-anything is signed, so they cost nothing.
+process budget `SCALPMCP_BUDGET_USD` is spent, or either limit is set to 0, which
+turns spending off. These are checked before anything is signed, so they cost
+nothing. A preview is never paid for: if one asks for payment the result says so
+and carries the price only.
 
 ## Spending rules
 

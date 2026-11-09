@@ -3,7 +3,7 @@
   "name": "io.github.DV1-321/scalpstream-mcp",
   "title": "ScalpStream Data",
   "description": "Pay-per-call recalls, border waits, fuel, air quality, wash-sale checks via x402; your engine too.",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "repository": {
     "url": "https://github.com/DV1-321/scalpstream-mcp",
     "source": "github"
@@ -12,7 +12,7 @@
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/dv1-321/scalpstream-mcp:v0.1.13",
+      "identifier": "ghcr.io/dv1-321/scalpstream-mcp:v0.1.14",
       "transport": {
         "type": "stdio"
       },
@@ -25,13 +25,13 @@
         },
         {
           "name": "SCALPMCP_MAX_PRICE_USD",
-          "description": "Refuse any single call quoted above this many dollars. Defaults to 0.10. Checked before anything is signed, so a refusal costs nothing.",
+          "description": "Refuse any single call quoted above this many dollars. Defaults to 0.10; 0 turns spending off. Checked before anything is signed, so a refusal costs nothing.",
           "isRequired": false,
           "isSecret": false
         },
         {
           "name": "SCALPMCP_BUDGET_USD",
-          "description": "Refuse once this process has spent this many dollars in total. Defaults to 2.00.",
+          "description": "Refuse once this process has spent this many dollars in total. Defaults to 2.00; 0 turns spending off.",
           "isRequired": false,
           "isSecret": false
         },
