@@ -286,11 +286,16 @@ func (ts *toolset) dispatch(ctx context.Context, name string, rawArgs json.RawMe
 			"howto":    howToEnable,
 			"note":     "This is the FREE PREVIEW, not the paid dataset. The paid call returns the full result described by this tool.",
 		}
-		preview, perr := ts.client.FetchResponse(ctx, t.Preview)
+		// FetchFree, not FetchResponse: this path tells the caller nothing was
+		// charged, so it must not be able to pay. Through the paying client a
+		// /preview answering 402 under the cap was signed, spent the user's
+		// money, and was still reported paid:false.
+		preview, perr := ts.client.FetchFree(ctx, t.Preview)
 		if perr == nil {
 			attachBody(out, preview.Body, preview.Truncated)
 		} else {
 			out["error"] = perr.Error()
+			out["note"] = "No free preview could be fetched, so this result carries the price only. Nothing was charged."
 		}
 		return render(out)
 	}

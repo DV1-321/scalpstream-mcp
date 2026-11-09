@@ -388,6 +388,30 @@ func (c *Client) FetchResponse(ctx context.Context, url string) (Response, error
 	}, nil
 }
 
+// FetchFree GETs a resource that is meant to be free, and never pays for it,
+// whatever the Signer, the cap or the budget would allow. A 402 is refused with
+// the quote: a free preview that asks for money is a broken or hostile preview,
+// and a caller telling the user "this is free" must be able to rely on that.
+func (c *Client) FetchFree(ctx context.Context, url string) (Response, error) {
+	resp, err := c.do(ctx, url, "")
+	if err != nil {
+		return Response{}, err
+	}
+	switch resp.status {
+	case http.StatusOK:
+		return Response{Body: resp.body, Status: resp.status, Truncated: resp.truncated}, nil
+	case http.StatusPaymentRequired:
+		refusal := &ErrPaymentRequired{Resource: url, Reason: "it is meant to be free but asked for payment, and was not paid"}
+		if ch, err := decodeChallenge(resp.header.Get(x402.HeaderPaymentRequiredStd), resp.body); err == nil {
+			if opt, _, ok := findEVMOption(ch, c.PreferChainID); ok {
+				refusal.Quote = quoteOf(opt)
+			}
+		}
+		return Response{Status: resp.status}, refusal
+	}
+	return Response{Status: resp.status}, fmt.Errorf("x402client: %s: HTTP %d: %s", url, resp.status, snippet(resp.body, 300))
+}
+
 // settlementTransaction reads the transaction the seller reported for a settled
 // payment from PAYMENT-RESPONSE (x402 v2) or X-PAYMENT-RESPONSE (v1): base64 of
 // a JSON object whose "transaction" is the on-chain hash.
