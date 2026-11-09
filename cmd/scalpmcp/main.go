@@ -29,6 +29,8 @@
 //	                       so it needs no ETH.
 //	SCALPMCP_MAX_PRICE_USD Per-call ceiling in dollars (default 0.10).
 //	SCALPMCP_BUDGET_USD    Whole-process ceiling in dollars (default 2.00).
+//	                       0 in either one turns spending off, key or no key.
+//	                       A negative or unreadable value stops the server.
 //	SCALPMCP_FUEL_URL, _AIR_URL, _BORDER_URL, _RECALL_URL, _BASIS_URL, _ENGINE_URL
 //	                       Override service origins (testing). One per
 //	                       service; a service with no override cannot be
@@ -42,6 +44,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"math/big"
@@ -108,8 +111,13 @@ func main() {
 			log.Fatalf("EVM_BASE_PRIVATE_KEY is set but unusable: %v", err)
 		}
 		client.Signer = signer
-		log.Printf("paid mode: buyer %s, per-call cap %s, session budget %s (atomic USDC)",
-			signer.Address(), client.MaxPriceAtomic, client.Budget)
+		if client.CanPay() {
+			log.Printf("paid mode: buyer %s, per-call cap %s, session budget %s (atomic USDC)",
+				signer.Address(), client.MaxPriceAtomic, client.Budget)
+		} else {
+			log.Printf("spending off: a key is set, but the per-call cap (%s) or the session budget (%s) is zero. Paid tools return the free preview and the price.",
+				client.MaxPriceAtomic, client.Budget)
+		}
 	} else {
 		log.Printf("preview-only: no EVM_BASE_PRIVATE_KEY set. Paid tools return the free preview and the price.")
 	}
@@ -148,19 +156,36 @@ func endpointsFromEnv() endpoints {
 	return e
 }
 
-// usdEnv reads a dollar amount and converts it to USDC's atomic units (6
-// decimals). A malformed value falls back to the default rather than erroring:
-// the alternative is refusing to start over a spending LIMIT, and a limit that
-// prevents the program running protects nothing.
+// usdEnv reads a dollar limit from the environment. A value that cannot be read
+// as a limit stops the server: the alternative is guessing, and the guess that
+// used to be made (the default) could be more than the user meant to allow.
 func usdEnv(name string, def *big.Int) *big.Int {
-	raw := strings.TrimSpace(os.Getenv(name))
+	out, err := parseUSD(os.Getenv(name), def)
+	if err != nil {
+		log.Fatalf("%s: %v", name, err)
+	}
+	return out
+}
+
+// parseUSD converts a dollar amount to USDC's atomic units (6 decimals). Empty
+// is the default. Zero is a real limit, "spend nothing", and is returned as
+// zero (2026-11-08 sweep, finding G-2): it, and a negative value, used to log
+// one stderr line and become the default, so a user turning spending off with a
+// key still set got a $2.00 budget.
+func parseUSD(raw string, def *big.Int) (*big.Int, error) {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return def
+		return def, nil
 	}
 	rat, ok := new(big.Rat).SetString(raw)
-	if !ok || rat.Sign() <= 0 {
-		log.Printf("WARNING: %s=%q is not a positive number; using the default %s atomic units", name, raw, def)
-		return def
+	if !ok {
+		return nil, fmt.Errorf("%q is not a dollar amount: use a plain number such as 0.10, 0 to turn spending off, or unset it for the default %s atomic units", raw, def)
+	}
+	if rat.Sign() < 0 {
+		return nil, fmt.Errorf("%q is negative: use a plain number such as 0.10, 0 to turn spending off, or unset it for the default %s atomic units", raw, def)
+	}
+	if rat.Sign() == 0 {
+		return new(big.Int), nil
 	}
 	atoms := rat.Mul(rat, new(big.Rat).SetInt64(1_000_000))
 	out := atoms.Num()
@@ -170,11 +195,10 @@ func usdEnv(name string, def *big.Int) *big.Int {
 		out = new(big.Int).Quo(atoms.Num(), atoms.Denom())
 	}
 	if out.Sign() <= 0 {
-		// A value under one atomic unit rounded to 0, and the client reads 0
-		// as "use the default" — which RAISED a limit the user set to turn
-		// spending off (2026-11-04 review, finding 2). Refuse to start: a
-		// limit that silently means the opposite protects nothing.
-		log.Fatalf("%s=%q is under one atomic unit of USDC (0.000001): set it to at least 0.000001, or unset it for the default %s atomic units", name, raw, def)
+		// A positive value under one atomic unit would round to 0 and turn
+		// spending off, which is not what asking for a tiny limit says
+		// (2026-11-04 review, finding 2). Refuse to start and say so.
+		return nil, fmt.Errorf("%q is under one atomic unit of USDC (0.000001): set it to at least 0.000001, 0 to turn spending off, or unset it for the default %s atomic units", raw, def)
 	}
-	return out
+	return out, nil
 }

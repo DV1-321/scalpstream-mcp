@@ -136,6 +136,8 @@ func (ts *toolset) instructions() string {
 	if ts.client.CanPay() {
 		spent, calls := ts.client.Spent()
 		mode = fmt.Sprintf("PAID MODE: calls settle USDC on Base at roughly $0.01 each. Spent so far: %s atomic units over %d calls.", spent, calls)
+	} else if ts.client.Signer != nil {
+		mode = "SPENDING OFF: the user has set a spending limit of zero, so nothing can be charged and paid tools return the free preview plus the exact price. " + spendingOffHowTo
 	}
 	// The domain list is the tool catalogue in prose, and it must stay in step
 	// with buildTools: a domain named here that no tool serves sends a model
@@ -158,6 +160,20 @@ func (ts *toolset) instructions() string {
 const howToEnable = "Ask the user to add EVM_BASE_PRIVATE_KEY (a throwaway Base-mainnet key holding a little USDC) " +
 	"to the MCP server's environment — the env block of this server's entry in the MCP client's config — " +
 	"and restart the server. Never request, accept or echo the key in chat. Gas is sponsored by the facilitator, so no ETH is needed."
+
+// spendingOffHowTo replaces howToEnable when a key IS set and a limit of zero
+// is what stops the payment: asking for a key would be the wrong advice, and it
+// is the user's choice, so an agent should not try to talk them out of it.
+const spendingOffHowTo = "SCALPMCP_MAX_PRICE_USD or SCALPMCP_BUDGET_USD is set to 0 in this server's environment, which turns spending off. " +
+	"Only the user can change that, by raising the value and restarting the server."
+
+// howTo is what a caller is told about enabling paid calls.
+func (ts *toolset) howTo() string {
+	if ts.client.Signer != nil && ts.client.SpendingOff() {
+		return spendingOffHowTo
+	}
+	return howToEnable
+}
 
 // callTimeout bounds a single tool call, including its paid fetch. It is
 // generous because abandoning a PAID request loses the money — settlement runs
@@ -283,7 +299,7 @@ func (ts *toolset) dispatch(ctx context.Context, name string, rawArgs json.RawMe
 			"complete": false,
 			"reason":   pay.Reason,
 			"price":    pay.Quote,
-			"howto":    howToEnable,
+			"howto":    ts.howTo(),
 			"note":     "This is the FREE PREVIEW, not the paid dataset. The paid call returns the full result described by this tool.",
 		}
 		// FetchFree, not FetchResponse: this path tells the caller nothing was
@@ -444,7 +460,7 @@ func (ts *toolset) status() map[string]any {
 			"Counted against the budget, because a payment on the wire is a payment."
 	}
 	if !ts.client.CanPay() {
-		st["how_to_enable"] = howToEnable
+		st["how_to_enable"] = ts.howTo()
 	}
 	return map[string]any{
 		"paid":     false, // this tool costs nothing

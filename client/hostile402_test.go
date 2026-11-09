@@ -9,6 +9,8 @@ package client_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,6 +34,43 @@ func hostileSeller(t *testing.T, accepts string) (*httptest.Server, *atomic.Int3
 	}))
 	t.Cleanup(srv.Close)
 	return srv, &paidAttempts
+}
+
+// Sweep 2026-11-08, finding G-2. An explicit zero limit means spend nothing,
+// so even a quote of zero is refused unsigned. A nil limit is still the default.
+func TestAZeroLimitRefusesEveryQuoteUnsigned(t *testing.T) {
+	const genuine = `{"scheme":"exact","network":"eip155:8453","amount":"%s","asset":"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913","payTo":"0x1111111111111111111111111111111111111111"}`
+	for name, limits := range map[string]func(*client.Client){
+		"budget": func(c *client.Client) { c.Budget = big.NewInt(0) },
+		"cap":    func(c *client.Client) { c.MaxPriceAtomic = big.NewInt(0) },
+	} {
+		for _, amount := range []string{"10000", "0"} {
+			t.Run(name+" quoted "+amount, func(t *testing.T) {
+				srv, paid := hostileSeller(t, fmt.Sprintf(genuine, amount))
+				c := &client.Client{Signer: testSigner(t)}
+				limits(c)
+				if c.CanPay() {
+					t.Error("CanPay is true with a zero limit")
+				}
+				_, err := c.Fetch(context.Background(), srv.URL)
+				var refused *client.ErrPaymentRequired
+				if !errors.As(err, &refused) || !strings.Contains(refused.Reason, "turned off") {
+					t.Fatalf("got %v, want a refusal saying spending is turned off", err)
+				}
+				if paid.Load() != 0 {
+					t.Fatal("a zero limit signed a payment")
+				}
+			})
+		}
+	}
+	srv, paid := hostileSeller(t, fmt.Sprintf(genuine, "10000"))
+	c := &client.Client{Signer: testSigner(t)}
+	if _, err := c.Fetch(context.Background(), srv.URL); err != nil {
+		t.Fatalf("nil limits must still mean the defaults: %v", err)
+	}
+	if paid.Load() != 1 {
+		t.Fatalf("paid attempts = %d, want 1", paid.Load())
+	}
 }
 
 func TestAnOptionNamingAnotherAssetOrChainIsNeverSigned(t *testing.T) {

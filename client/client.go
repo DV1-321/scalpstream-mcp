@@ -85,13 +85,15 @@ type Client struct {
 	Signer *pay.Signer
 
 	// MaxPriceAtomic refuses any single call quoted above this, in the asset's
-	// atomic units (USDC has 6 decimals, so 10000 is $0.01). Zero means the
+	// atomic units (USDC has 6 decimals, so 10000 is $0.01). Nil means the
 	// DefaultMaxPrice below rather than "unlimited" — an unset cap must not be
-	// the permissive case when real funds are involved.
+	// the permissive case when real funds are involved. A value set to zero or
+	// less turns spending off: every 402 is refused unsigned.
 	MaxPriceAtomic *big.Int
 
-	// Budget caps total spend for this process, same units. Zero means
-	// DefaultBudget, again deliberately not unlimited.
+	// Budget caps total spend for this process, same units. Nil means
+	// DefaultBudget, again deliberately not unlimited; zero or less turns
+	// spending off, as for MaxPriceAtomic.
 	Budget *big.Int
 
 	// Attestation is sent as X-Compliance-Attestation; some feeds gate on it.
@@ -143,21 +145,28 @@ func (c *Client) httpClient() *http.Client {
 }
 
 func (c *Client) maxPrice() *big.Int {
-	if c.MaxPriceAtomic != nil && c.MaxPriceAtomic.Sign() > 0 {
+	if c.MaxPriceAtomic != nil {
 		return c.MaxPriceAtomic
 	}
 	return DefaultMaxPrice
 }
 
 func (c *Client) budget() *big.Int {
-	if c.Budget != nil && c.Budget.Sign() > 0 {
+	if c.Budget != nil {
 		return c.Budget
 	}
 	return DefaultBudget
 }
 
-// CanPay reports whether this client is configured to spend.
-func (c *Client) CanPay() bool { return c.Signer != nil }
+// CanPay reports whether this client is configured to spend: it holds a key and
+// neither limit turns spending off.
+func (c *Client) CanPay() bool { return c.Signer != nil && !c.SpendingOff() }
+
+// SpendingOff reports whether a limit was explicitly set to zero or less, which
+// refuses every 402 whether or not a key is held.
+func (c *Client) SpendingOff() bool {
+	return c.maxPrice().Sign() <= 0 || c.budget().Sign() <= 0
+}
 
 // Spent returns confirmed atomic units spent and the number of paid calls that
 // actually returned a resource.
@@ -290,6 +299,10 @@ func (c *Client) FetchResponse(ctx context.Context, url string) (Response, error
 	if c.Signer == nil {
 		return refused, &ErrPaymentRequired{Resource: url, Quote: quote,
 			Reason: "no spending key configured (set EVM_BASE_PRIVATE_KEY in the MCP server's environment to enable paid calls)"}
+	}
+	if c.SpendingOff() {
+		return refused, &ErrPaymentRequired{Resource: url, Quote: quote,
+			Reason: "spending is turned off: the per-call cap or the session budget is set to zero"}
 	}
 
 	amount, ok := new(big.Int).SetString(opt.Amount, 10)
