@@ -503,6 +503,35 @@ func argNum(args map[string]any, key string) (float64, bool) {
 	}
 }
 
+// argSet reports whether an optional argument was given at all: a model sends
+// null or a blank string for "not set".
+func argSet(args map[string]any, key string) bool {
+	switch v := args[key].(type) {
+	case nil:
+		return false
+	case string:
+		return strings.TrimSpace(v) != ""
+	default:
+		return true
+	}
+}
+
+// argWhole reads an optional whole number in lo..hi, comparing as a float so
+// that 1e300 is refused rather than handed to int(), whose result out of range
+// is implementation-defined. A value that is given and is not one is an error,
+// raised by BuildURL before any request: it used to be dropped or sent on, and
+// the wallet paid for an answer to a different question.
+func argWhole(args map[string]any, key string, lo, hi int) (int, bool, error) {
+	if !argSet(args, key) {
+		return 0, false, nil
+	}
+	v, ok := argNum(args, key)
+	if !ok || v != math.Trunc(v) || v < float64(lo) || v > float64(hi) {
+		return 0, false, fmt.Errorf("%s must be a whole number from %d to %d, got %v", key, lo, hi, args[key])
+	}
+	return int(v), true, nil
+}
+
 // argBool reads a boolean argument. Models send booleans as JSON true/false, as
 // the strings "true"/"false"/"1"/"0"/"yes"/"no" in any case, and occasionally as
 // the numbers 1/0; all of those are accepted. Anything else is an error, and
@@ -669,8 +698,8 @@ func buildTools(e endpoints) []tool {
 			Schema: obj(map[string]any{
 				"lat":      numProp("Latitude in decimal degrees."),
 				"lon":      numProp("Longitude in decimal degrees."),
-				"hours":    numProp("How far ahead to search for a clean window, in hours. Default 24, maximum 168."),
-				"duration": numProp("How long you want to be outside, in hours; the window returned is a contiguous block this long. Default 1, maximum 12."),
+				"hours":    numProp("How far ahead to search for a clean window, in whole hours. Default 24, maximum 168."),
+				"duration": numProp("How long you want to be outside, in whole hours; the window returned is a contiguous block this long. Default 1, maximum 12, and no more than hours."),
 				"place":    strProp("Optional label for the location, used in the summary text."),
 			}, "lat", "lon"),
 			Preview: e.Air + "/preview",
@@ -683,11 +712,24 @@ func buildTools(e endpoints) []tool {
 				q := url.Values{}
 				q.Set("lat", lat)
 				q.Set("lon", lon)
-				if h, ok := argNum(args, "hours"); ok {
-					q.Set("hours", strconv.Itoa(int(h)))
+				hours, hasHours, err := argWhole(args, "hours", 1, 168)
+				if err != nil {
+					return "", err
 				}
-				if d, ok := argNum(args, "duration"); ok {
-					q.Set("duration", strconv.Itoa(int(d)))
+				duration, hasDuration, err := argWhole(args, "duration", 1, 12)
+				if err != nil {
+					return "", err
+				}
+				span := 24 // the service's default search span
+				if hasHours {
+					span = hours
+					q.Set("hours", strconv.Itoa(hours))
+				}
+				if hasDuration {
+					if duration > span {
+						return "", fmt.Errorf("duration (%d h) cannot exceed hours (%d h): the window must fit in the span searched", duration, span)
+					}
+					q.Set("duration", strconv.Itoa(duration))
 				}
 				if p := argStr(args, "place"); p != "" {
 					q.Set("place", p)
@@ -707,7 +749,7 @@ func buildTools(e endpoints) []tool {
 				"vehicle": enumProp("Traffic type.", "passenger", "commercial", "pedestrian"),
 				"lanes":   strProp("Comma-separated lanes the traveller is eligible for, e.g. 'standard,SENTRI/NEXUS,Ready,FAST'. Defaults to standard only — trusted-traveller lanes are opt-in, since claiming one the traveller cannot use returns a wait they cannot have."),
 				"radius":  numProp("Limit the search to crossings within this many km. 0 or omitted means no limit."),
-				"limit":   numProp("How many crossings to return. Default 5."),
+				"limit":   numProp("How many crossings to return. Default 5, maximum 100."),
 				"place":   strProp("Optional label for the starting point, used in the summary text."),
 			}, "lat", "lon"),
 			Preview: e.Border + "/preview",
@@ -726,11 +768,21 @@ func buildTools(e endpoints) []tool {
 				if l := argStr(args, "lanes"); l != "" {
 					q.Set("lanes", l)
 				}
-				if r, ok := argNum(args, "radius"); ok && r > 0 {
-					q.Set("radius", strconv.Itoa(int(r)))
+				if argSet(args, "radius") {
+					r, ok := argNum(args, "radius")
+					if !ok || r < 0 {
+						return "", fmt.Errorf("radius must be a number of km, 0 or more, got %v", args["radius"])
+					}
+					if r > 0 { // 0 means no limit, which is also what omitting it means
+						q.Set("radius", strconv.FormatFloat(r, 'f', -1, 64))
+					}
 				}
-				if n, ok := argNum(args, "limit"); ok && n > 0 {
-					q.Set("limit", strconv.Itoa(int(n)))
+				limit, hasLimit, err := argWhole(args, "limit", 1, 100)
+				if err != nil {
+					return "", err
+				}
+				if hasLimit {
+					q.Set("limit", strconv.Itoa(limit))
 				}
 				if p := argStr(args, "place"); p != "" {
 					q.Set("place", p)
@@ -753,16 +805,19 @@ func buildTools(e endpoints) []tool {
 				"product":       strProp("Product, brand or ingredient, e.g. 'infant formula'. Matched as a phrase, so keep it short and specific."),
 				"make":          strProp("Vehicle make. Requires model and year together."),
 				"model":         strProp("Vehicle model."),
-				"year":          numProp("Vehicle model year."),
+				"year":          numProp("Vehicle model year, 1900 to 2100."),
 				"include_ended": map[string]any{"type": "boolean", "description": "Also return terminated recalls as history. Off by default; they are rarely what was meant."},
-				"limit":         numProp("Max recalls per list. Default 10."),
+				"limit":         numProp("Max recalls per list. Default 10, maximum 100."),
 			}),
 			Preview: e.Recall + "/preview",
 			Output:  envelopeSchema("Active (and optionally ended) recalls across FDA, NHTSA and CPSC with normalised severity, hazard, remedy, lot numbers, and a `complete` flag that is false when an agency could not be reached."),
 			BuildURL: func(args map[string]any) (string, error) {
 				product := argStr(args, "product")
 				mk, md := argStr(args, "make"), argStr(args, "model")
-				yr, hasYear := argNum(args, "year")
+				yr, hasYear, err := argWhole(args, "year", 1900, 2100)
+				if err != nil {
+					return "", err
+				}
 				anyVehicle := mk != "" || md != "" || hasYear
 
 				if product == "" && !anyVehicle {
@@ -780,7 +835,7 @@ func buildTools(e endpoints) []tool {
 				if anyVehicle {
 					q.Set("make", mk)
 					q.Set("model", md)
-					q.Set("year", strconv.Itoa(int(yr)))
+					q.Set("year", strconv.Itoa(yr))
 				}
 				ended, _, err := argBool(args, "include_ended")
 				if err != nil {
@@ -789,8 +844,12 @@ func buildTools(e endpoints) []tool {
 				if ended {
 					q.Set("include_ended", "1")
 				}
-				if n, ok := argNum(args, "limit"); ok && n > 0 {
-					q.Set("limit", strconv.Itoa(int(n)))
+				limit, hasLimit, err := argWhole(args, "limit", 1, 100)
+				if err != nil {
+					return "", err
+				}
+				if hasLimit {
+					q.Set("limit", strconv.Itoa(limit))
 				}
 				return e.Recall + "/recalls?" + q.Encode(), nil
 			},
