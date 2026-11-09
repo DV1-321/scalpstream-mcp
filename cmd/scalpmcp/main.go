@@ -30,7 +30,8 @@
 //	SCALPMCP_MAX_PRICE_USD Per-call ceiling in dollars (default 0.10).
 //	SCALPMCP_BUDGET_USD    Whole-process ceiling in dollars (default 2.00).
 //	                       0 in either one turns spending off, key or no key.
-//	                       A negative or unreadable value stops the server.
+//	                       A negative or unreadable value turns spending off
+//	                       too, with a warning; "$2" and "2 USD" are read.
 //	SCALPMCP_FUEL_URL, _AIR_URL, _BORDER_URL, _RECALL_URL, _BASIS_URL, _ENGINE_URL
 //	                       Override service origins (testing). One per
 //	                       service; a service with no override cannot be
@@ -44,6 +45,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -160,33 +162,62 @@ func endpointsFromEnv() endpoints {
 	return e
 }
 
-// usdEnv reads a dollar limit from the environment. A value that cannot be read
-// as a limit stops the server: the alternative is guessing, and the guess that
-// used to be made (the default) could be more than the user meant to allow.
+// usdEnv reads a dollar limit from the environment (see resolveLimit).
 func usdEnv(name string, def *big.Int) *big.Int {
-	out, err := parseUSD(os.Getenv(name), def)
+	out, warn, err := resolveLimit(name, os.Getenv(name), def)
 	if err != nil {
 		log.Fatalf("%s: %v", name, err)
 	}
+	if warn != "" {
+		log.Print(warn)
+	}
 	return out
+}
+
+// errNotALimit marks a value that says no amount at all: unreadable or negative.
+var errNotALimit = errors.New("not a spending limit")
+
+// resolveLimit decides what a limit's raw value means for the server. A value
+// that cannot be read as a limit turns spending off and returns a warning for
+// the log; the server keeps running (review of the 0.1.14 branch, finding R-1).
+// Neither older behaviour was right: 0.1.13 used the default, which could be
+// more than the user meant to allow, and the first 0.1.14 cut stopped the
+// server, which took the free previews down with it for a typo. A positive
+// value under one atomic unit is still an error that stops the server, as in
+// 0.1.13.
+func resolveLimit(name, raw string, def *big.Int) (*big.Int, string, error) {
+	out, err := parseUSD(raw, def)
+	if errors.Is(err, errNotALimit) {
+		return new(big.Int), fmt.Sprintf("WARNING: %s: %v. Until it is fixed, spending is off: paid tools return the free preview and the price.", name, err), nil
+	}
+	return out, "", err
 }
 
 // parseUSD converts a dollar amount to USDC's atomic units (6 decimals). Empty
 // is the default. Zero is a real limit, "spend nothing", and is returned as
 // zero (2026-11-08 sweep, finding G-2): it, and a negative value, used to log
 // one stderr line and become the default, so a user turning spending off with a
-// key still set got a $2.00 budget.
+// key still set got a $2.00 budget. A leading "$" and a trailing "USD" or
+// "USDC" are read, since each says exactly one amount; anything else that is
+// not a plain number (a comma, another currency) is errNotALimit.
 func parseUSD(raw string, def *big.Int) (*big.Int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return def, nil
 	}
-	rat, ok := new(big.Rat).SetString(raw)
-	if !ok {
-		return nil, fmt.Errorf("%q is not a dollar amount: use a plain number such as 0.10, 0 to turn spending off, or unset it for the default %s atomic units", raw, def)
+	num := strings.TrimSpace(strings.TrimPrefix(raw, "$"))
+	for _, unit := range []string{"usdc", "usd"} {
+		if len(num) > len(unit) && strings.EqualFold(num[len(num)-len(unit):], unit) {
+			num = strings.TrimSpace(num[:len(num)-len(unit)])
+			break
+		}
+	}
+	rat, ok := new(big.Rat).SetString(num)
+	if num == "" || !ok {
+		return nil, fmt.Errorf("%q is not a dollar amount (%w): use a plain number such as 0.10, 0 to turn spending off, or unset it for the default %s atomic units", raw, errNotALimit, def)
 	}
 	if rat.Sign() < 0 {
-		return nil, fmt.Errorf("%q is negative: use a plain number such as 0.10, 0 to turn spending off, or unset it for the default %s atomic units", raw, def)
+		return nil, fmt.Errorf("%q is negative (%w): use a plain number such as 0.10, 0 to turn spending off, or unset it for the default %s atomic units", raw, errNotALimit, def)
 	}
 	if rat.Sign() == 0 {
 		return new(big.Int), nil

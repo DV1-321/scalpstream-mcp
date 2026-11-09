@@ -32,11 +32,70 @@ func TestSpendingLimitValues(t *testing.T) {
 			t.Errorf("parseUSD(%q) = %s, want %d", raw, got, want)
 		}
 	}
-	// A value that is not a limit stops the server rather than becoming the
-	// default, which could be more than the user meant to allow.
-	for _, raw := range []string{"-1", "-0.01", "two dollars", "$2", "0.0000001"} {
+	// A value that is not a limit is an error from parseUSD; resolveLimit
+	// decides what the server does with it (below).
+	for _, raw := range []string{"-1", "-0.01", "two dollars", "2,00", "$", "0.0000001"} {
 		if got, err := parseUSD(raw, def); err == nil {
 			t.Errorf("parseUSD(%q) = %s, want an error", raw, got)
+		}
+	}
+}
+
+// Review of the 0.1.14 branch, finding R-1. G-2 made a negative or unreadable
+// limit stop the server; 0.1.13 logged a warning and used the default, so an
+// env block holding "SCALPMCP_BUDGET_USD": "$2" that worked on 0.1.13 left the
+// host reporting only that the server failed to start. Neither guess is right:
+// the default could be more than the user meant to allow, and stopping takes
+// the free previews down with it. A value that cannot be read now turns
+// spending off, says so, and the server runs. Plain dollar spellings that say
+// exactly one amount are read.
+func TestAnUnreadableLimitTurnsSpendingOffAndTheServerRuns(t *testing.T) {
+	def := big.NewInt(2_000_000)
+	for raw, want := range map[string]int64{
+		"$2":        2_000_000,
+		"$0.10":     100_000,
+		" $ 2.00 ":  2_000_000,
+		"2 USD":     2_000_000,
+		"2.00 usdc": 2_000_000,
+		"$0":        0,
+	} {
+		got, warn, err := resolveLimit("SCALPMCP_BUDGET_USD", raw, def)
+		if err != nil || warn != "" || got.Cmp(big.NewInt(want)) != 0 {
+			t.Errorf("resolveLimit(%q) = %v, %q, %v; want %d with no warning", raw, got, warn, err, want)
+		}
+	}
+	for _, raw := range []string{"-1", "-0.01", "two dollars", "2,00", "$", "USD", "2 EUR"} {
+		got, warn, err := resolveLimit("SCALPMCP_BUDGET_USD", raw, def)
+		if err != nil {
+			t.Errorf("resolveLimit(%q) stops the server: %v", raw, err)
+			continue
+		}
+		if got == nil || got.Sign() != 0 {
+			t.Errorf("resolveLimit(%q) = %v, want 0 (spending off), never the default", raw, got)
+		}
+		if !strings.Contains(warn, "SCALPMCP_BUDGET_USD") || !strings.Contains(warn, "spending is off") {
+			t.Errorf("resolveLimit(%q) warning = %q, want it to name the variable and say spending is off", raw, warn)
+		}
+	}
+	// A positive value under one atomic unit still stops the server, as it did
+	// in 0.1.13: turning spending off is not what asking for a tiny limit says.
+	if got, _, err := resolveLimit("SCALPMCP_BUDGET_USD", "0.0000001", def); err == nil {
+		t.Errorf("resolveLimit(0.0000001) = %v, want the server to stop", got)
+	}
+}
+
+// The model must not be told the user set a limit of zero when the limit is
+// zero because it could not be read.
+func TestSpendingOffAdviceCoversAnUnreadableLimit(t *testing.T) {
+	seller := newStubSeller(t, []byte(`{"crossings":[]}`), []byte(`{"sample":true}`), false)
+	ts := payingToolset(t, seller.URL)
+	ts.client.Budget, _, _ = resolveLimit("SCALPMCP_BUDGET_USD", "two dollars", big.NewInt(2_000_000))
+	if !ts.client.SpendingOff() {
+		t.Fatal("an unreadable budget did not turn spending off")
+	}
+	for what, text := range map[string]string{"howto": ts.howTo(), "instructions": ts.instructions()} {
+		if !strings.Contains(text, "could not be read") {
+			t.Errorf("%s does not say the limit may be unreadable: %s", what, text)
 		}
 	}
 }

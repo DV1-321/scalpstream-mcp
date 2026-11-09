@@ -15,7 +15,9 @@ registry as `io.github.DV1-321/scalpstream-mcp` and as the
 - `SCALPMCP_MAX_PRICE_USD=0` or `SCALPMCP_BUDGET_USD=0` now means spend nothing.
   Both used to become the default, so a user turning spending off with a key set
   got a $2.00 budget. Paid tools return the preview and the price, even for a
-  quote of zero. A negative or unreadable value now stops the server. With a
+  quote of zero. A negative or unreadable value used to become the default too;
+  it now turns spending off, with a warning in the log, and the server keeps
+  serving free previews. `$2`, `2 USD` and `2 USDC` are read as 2.00. With a
   limit of zero nothing asks the user to add a key, set or not.
 - The EIP-712 domain of USDC is pinned on Base, Arbitrum and Polygon. It was taken
   from the seller's 402, and a wrong one could hold the session budget as

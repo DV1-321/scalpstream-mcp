@@ -140,7 +140,7 @@ func (ts *toolset) instructions() string {
 		spent, calls := ts.client.Spent()
 		mode = fmt.Sprintf("PAID MODE: calls settle USDC on Base at roughly $0.01 each. Spent so far: %s atomic units over %d calls.", spent, calls)
 	} else if ts.client.SpendingOff() {
-		mode = "SPENDING OFF: the user has set a spending limit of zero, so nothing can be charged and paid tools return the free preview plus the exact price. " + spendingOffHowTo
+		mode = "SPENDING OFF: a spending limit is zero, or could not be read and counts as zero, so nothing can be charged and paid tools return the free preview plus the exact price. " + spendingOffHowTo
 	}
 	// The domain list is the tool catalogue in prose, and it must stay in step
 	// with buildTools: a domain named here that no tool serves sends a model
@@ -168,8 +168,9 @@ const howToEnable = "Ask the user to add EVM_BASE_PRIVATE_KEY (a throwaway Base-
 // payment, key or no key: a key would still not spend, so asking for one is the
 // wrong advice, and it is the user's choice, so an agent should not try to talk
 // them out of it.
-const spendingOffHowTo = "SCALPMCP_MAX_PRICE_USD or SCALPMCP_BUDGET_USD is set to 0 in this server's environment, which turns spending off. " +
-	"Only the user can change that, by raising the value and restarting the server."
+const spendingOffHowTo = "SCALPMCP_MAX_PRICE_USD or SCALPMCP_BUDGET_USD is set to 0 in this server's environment, or to a value that could not be read " +
+	"as a dollar amount (the server's log names which), and either turns spending off. " +
+	"Only the user can change that, by setting a plain number such as 2.00 and restarting the server."
 
 // howTo is what a caller is told about enabling paid calls.
 func (ts *toolset) howTo() string {
