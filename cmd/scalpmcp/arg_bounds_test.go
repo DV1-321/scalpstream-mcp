@@ -15,12 +15,26 @@ import (
 // Sweep 2026-11-08, finding G-6. The descriptions promise ranges the code did
 // not enforce: hours:-5 and year:1e300 went to the seller, the second through
 // int() of an out-of-range float. A bad argument is an error before any request
-// and so before any 402 is answered; the bounds are the tool descriptions' and
-// the same ones the scouts Actors enforce.
+// and so before any 402 is answered. hours, duration and year come from the tool
+// descriptions. limit's maximum of 100 comes from the scouts Actors (scout.go):
+// the descriptions gained it in this same change, and the sellers publish no
+// maximum for border_crossings or product_recalls.
 func TestArgumentsOutOfRangeAreRefusedBeforeAnyRequest(t *testing.T) {
 	const here = `"lat":32.7157,"lon":-117.1611`
 	const car = `"make":"Honda","model":"Civic"`
+	const trades = `"trades":"ira,taxable,2025-03-03,PLTR,buy,1,10"`
 	for _, tc := range []struct{ tool, args, want string }{
+		{"wash_sale_check", `{` + trades + `,"year":"last"}`, "year"},
+		{"wash_sale_check", `{` + trades + `,"year":"2025x"}`, "year"},
+		{"wash_sale_check", `{` + trades + `,"year":true}`, "year"},
+		{"wash_sale_check", `{` + trades + `,"year":[2025]}`, "year"},
+		{"wash_sale_check", `{` + trades + `,"year":{}}`, "year"},
+		{"wash_sale_check", `{` + trades + `,"year":"NaN"}`, "year"},
+		{"wash_sale_check", `{` + trades + `,"year":1e300}`, "year"},
+		{"wash_sale_check", `{` + trades + `,"year":-1}`, "year"},
+		{"wash_sale_check", `{` + trades + `,"year":1989}`, "year"},
+		{"wash_sale_check", `{` + trades + `,"year":2101}`, "year"},
+		{"wash_sale_check", `{` + trades + `,"year":2025.5}`, "year"},
 		{"air_quality", `{` + here + `,"hours":-5}`, "hours"},
 		{"air_quality", `{` + here + `,"hours":0}`, "hours"},
 		{"air_quality", `{` + here + `,"hours":169}`, "hours"},
@@ -57,7 +71,7 @@ func TestArgumentsOutOfRangeAreRefusedBeforeAnyRequest(t *testing.T) {
 				_, _ = w.Write([]byte(`{}`))
 			}))
 			t.Cleanup(srv.Close)
-			ts := newToolset(&client.Client{}, endpoints{Air: srv.URL, Border: srv.URL, Recall: srv.URL})
+			ts := newToolset(&client.Client{}, endpoints{Air: srv.URL, Border: srv.URL, Recall: srv.URL, Basis: srv.URL})
 			_, _, err := ts.call(context.Background(), tc.tool, json.RawMessage(tc.args))
 			if err == nil {
 				t.Fatalf("no error; the seller saw %d request(s)", hits.Load())
@@ -76,10 +90,11 @@ func TestArgumentsOutOfRangeAreRefusedBeforeAnyRequest(t *testing.T) {
 // still "not set".
 func TestArgumentsInRangeReachTheURL(t *testing.T) {
 	byName := map[string]tool{}
-	for _, tl := range buildTools(endpoints{Air: "https://a", Border: "https://b", Recall: "https://r"}) {
+	for _, tl := range buildTools(endpoints{Air: "https://a", Border: "https://b", Recall: "https://r", Basis: "https://w"}) {
 		byName[tl.Name] = tl
 	}
 	lat, lon := 32.7157, -117.1611
+	const trades = "ira,taxable,2025-03-03,PLTR,buy,1,10"
 	for _, tc := range []struct {
 		tool       string
 		args       map[string]any
@@ -94,6 +109,13 @@ func TestArgumentsInRangeReachTheURL(t *testing.T) {
 		{"product_recalls", map[string]any{"make": "Honda", "model": "Civic", "year": 2024.0, "limit": 100.0}, []string{"year=2024", "limit=100"}, nil},
 		{"product_recalls", map[string]any{"make": "Honda", "model": "Civic", "year": "2024"}, []string{"year=2024"}, []string{"limit="}},
 		{"product_recalls", map[string]any{"product": "infant formula", "year": ""}, []string{"product="}, []string{"year=", "make="}},
+		{"wash_sale_check", map[string]any{"trades": trades, "year": 2025.0}, []string{"year=2025"}, nil},
+		{"wash_sale_check", map[string]any{"trades": trades, "year": "2025"}, []string{"year=2025"}, nil},
+		{"wash_sale_check", map[string]any{"trades": trades, "year": 1990.0}, []string{"year=1990"}, nil},
+		{"wash_sale_check", map[string]any{"trades": trades, "year": 2100.0}, []string{"year=2100"}, nil},
+		{"wash_sale_check", map[string]any{"trades": trades, "year": " "}, nil, []string{"year="}},
+		{"wash_sale_check", map[string]any{"trades": trades, "year": nil}, nil, []string{"year="}},
+		{"wash_sale_check", map[string]any{"trades": trades}, nil, []string{"year="}},
 	} {
 		u, err := byName[tc.tool].BuildURL(tc.args)
 		if err != nil {

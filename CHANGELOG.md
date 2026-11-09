@@ -37,6 +37,15 @@ registry as `io.github.DV1-321/scalpstream-mcp` and as the
   more than `hours`, `radius` 0 or more, `limit` 1-100, `year` 1900-2100. These
   used to be sent on or dropped silently. A fractional `radius` is no longer cut
   to a whole number.
+- `wash_sale_check` refuses an unreadable `year` before any request. It was
+  dropped, and the call was paid for the totals of a different tax year.
+
+### Changed
+
+- Calls that 0.1.13 sent on and are now refused: `limit` above 100 on
+  `border_crossings` and `product_recalls`, `limit` of 0, and `duration` above 12
+  on `air_quality`. The sellers' HTTP routes publish no maximum for these. The
+  bounds are the MCP's own, and `limit` matches the scouts Actors.
 
 ## 0.1.13
 

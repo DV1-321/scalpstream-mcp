@@ -952,8 +952,11 @@ func buildTools(e endpoints) []tool {
 				} else if account != "" || qty != "" {
 					return "", errors.New("account and quantity apply to check=sell only")
 				}
-				if y, ok := argNum(args, "year"); ok {
-					if y < 1990 || y > 2100 || y != float64(int(y)) {
+				if argSet(args, "year") {
+					// Unreadable used to skip this and drop the parameter, and the
+					// wallet paid for the totals of a different tax year.
+					y, ok := argNum(args, "year")
+					if !ok || y < 1990 || y > 2100 || y != math.Trunc(y) {
 						return "", fmt.Errorf("year must be a four-digit tax year, got %v", args["year"])
 					}
 					q.Set("year", strconv.Itoa(int(y)))
