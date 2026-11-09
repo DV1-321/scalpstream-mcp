@@ -537,6 +537,17 @@ func argWhole(args map[string]any, key string, lo, hi int) (int, bool, error) {
 	return int(v), true, nil
 }
 
+// argWholeOrDefault is argWhole for a setting whose default the seller picks:
+// 0 is read as not set, because that is what a model sending 0 means (review
+// of the 0.1.14 branch, finding R-2). 0.1.13 dropped limit:0, and the sellers
+// clamp hours:0 and duration:0 rather than refusing them.
+func argWholeOrDefault(args map[string]any, key string, lo, hi int) (int, bool, error) {
+	if v, ok := argNum(args, key); ok && v == 0 {
+		return 0, false, nil
+	}
+	return argWhole(args, key, lo, hi)
+}
+
 // argBool reads a boolean argument. Models send booleans as JSON true/false, as
 // the strings "true"/"false"/"1"/"0"/"yes"/"no" in any case, and occasionally as
 // the numbers 1/0; all of those are accepted. Anything else is an error, and
@@ -704,7 +715,7 @@ func buildTools(e endpoints) []tool {
 				"lat":      numProp("Latitude in decimal degrees."),
 				"lon":      numProp("Longitude in decimal degrees."),
 				"hours":    numProp("How far ahead to search for a clean window, in whole hours. Default 24, maximum 168."),
-				"duration": numProp("How long you want to be outside, in whole hours; the window returned is a contiguous block this long. Default 1, maximum 12, and no more than hours."),
+				"duration": numProp("How long you want to be outside, in whole hours; the window returned is a contiguous block this long. Default 1, maximum 168, and no more than hours (so above 24, set hours too)."),
 				"place":    strProp("Optional label for the location, used in the summary text."),
 			}, "lat", "lon"),
 			Preview: e.Air + "/preview",
@@ -717,11 +728,13 @@ func buildTools(e endpoints) []tool {
 				q := url.Values{}
 				q.Set("lat", lat)
 				q.Set("lon", lon)
-				hours, hasHours, err := argWhole(args, "hours", 1, 168)
+				hours, hasHours, err := argWholeOrDefault(args, "hours", 1, 168)
 				if err != nil {
 					return "", err
 				}
-				duration, hasDuration, err := argWhole(args, "duration", 1, 12)
+				// airfeed publishes duration 1 to 168 and searches for exactly
+				// that window; 12 was this tool's own figure (finding R-2).
+				duration, hasDuration, err := argWholeOrDefault(args, "duration", 1, 168)
 				if err != nil {
 					return "", err
 				}
@@ -732,7 +745,9 @@ func buildTools(e endpoints) []tool {
 				}
 				if hasDuration {
 					if duration > span {
-						return "", fmt.Errorf("duration (%d h) cannot exceed hours (%d h): the window must fit in the span searched", duration, span)
+						// The seller would shorten the window to the span and
+						// charge for an answer to a different question.
+						return "", fmt.Errorf("duration (%d h) cannot exceed hours (%d h): the window must fit in the span searched, so set hours to at least %d", duration, span, duration)
 					}
 					q.Set("duration", strconv.Itoa(duration))
 				}
@@ -782,7 +797,7 @@ func buildTools(e endpoints) []tool {
 						q.Set("radius", strconv.FormatFloat(r, 'f', -1, 64))
 					}
 				}
-				limit, hasLimit, err := argWhole(args, "limit", 1, 100)
+				limit, hasLimit, err := argWholeOrDefault(args, "limit", 1, 100)
 				if err != nil {
 					return "", err
 				}
@@ -849,7 +864,7 @@ func buildTools(e endpoints) []tool {
 				if ended {
 					q.Set("include_ended", "1")
 				}
-				limit, hasLimit, err := argWhole(args, "limit", 1, 100)
+				limit, hasLimit, err := argWholeOrDefault(args, "limit", 1, 100)
 				if err != nil {
 					return "", err
 				}

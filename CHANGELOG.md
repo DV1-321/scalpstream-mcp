@@ -35,19 +35,25 @@ registry as `io.github.DV1-321/scalpstream-mcp` and as the
 ### Fixed
 
 - `air_quality`, `border_crossings` and `product_recalls` refuse an out-of-range
-  or unreadable number before any request: `hours` 1-168, `duration` 1-12 and no
-  more than `hours`, `radius` 0 or more, `limit` 1-100, `year` 1900-2100. These
-  used to be sent on or dropped silently. A fractional `radius` is no longer cut
-  to a whole number.
+  or unreadable number before any request: `hours` 1-168, `duration` 1-168 and
+  no more than `hours`, `radius` 0 or more, `limit` 1-100, `year` 1900-2100.
+  These used to be sent on or dropped silently. A fractional `radius` is no
+  longer cut to a whole number. `hours`, `duration` and `limit` of 0 mean not
+  set, so the service's default applies.
 - `wash_sale_check` refuses an unreadable `year` before any request. It was
   dropped, and the call was paid for the totals of a different tax year.
 
 ### Changed
 
 - Calls that 0.1.13 sent on and are now refused: `limit` above 100 on
-  `border_crossings` and `product_recalls`, `limit` of 0, and `duration` above 12
-  on `air_quality`. The sellers' HTTP routes publish no maximum for these. The
-  bounds are the MCP's own, and `limit` matches the scouts Actors.
+  `border_crossings` and `product_recalls`, and an `air_quality` `duration`
+  longer than `hours` (or than 24 when `hours` is not given). The sellers' HTTP
+  routes publish no maximum for `limit`; the bound is the MCP's own and matches
+  the scouts Actors. For a `duration` longer than `hours`, the seller shortens
+  the window to fit and charges for it, so the call is refused and the error
+  says to set `hours` to at least the `duration`.
+- `air_quality` `hours:0` now means the default 24-hour span. 0.1.13 sent it,
+  and the seller searched a single hour.
 
 ## 0.1.13
 

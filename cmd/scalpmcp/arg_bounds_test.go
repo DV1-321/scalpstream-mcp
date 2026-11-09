@@ -36,19 +36,17 @@ func TestArgumentsOutOfRangeAreRefusedBeforeAnyRequest(t *testing.T) {
 		{"wash_sale_check", `{` + trades + `,"year":2101}`, "year"},
 		{"wash_sale_check", `{` + trades + `,"year":2025.5}`, "year"},
 		{"air_quality", `{` + here + `,"hours":-5}`, "hours"},
-		{"air_quality", `{` + here + `,"hours":0}`, "hours"},
 		{"air_quality", `{` + here + `,"hours":169}`, "hours"},
 		{"air_quality", `{` + here + `,"hours":1e300}`, "hours"},
 		{"air_quality", `{` + here + `,"hours":1.5}`, "hours"},
 		{"air_quality", `{` + here + `,"hours":"soon"}`, "hours"},
-		{"air_quality", `{` + here + `,"duration":0}`, "duration"},
 		{"air_quality", `{` + here + `,"duration":-1}`, "duration"},
-		{"air_quality", `{` + here + `,"duration":13}`, "duration"},
+		{"air_quality", `{` + here + `,"duration":169}`, "duration"},
 		{"air_quality", `{` + here + `,"duration":2.5}`, "duration"},
 		{"air_quality", `{` + here + `,"hours":6,"duration":12}`, "cannot exceed"},
+		{"air_quality", `{` + here + `,"duration":48}`, "set hours to at least 48"},
 		{"border_crossings", `{` + here + `,"radius":-1}`, "radius"},
 		{"border_crossings", `{` + here + `,"radius":"near"}`, "radius"},
-		{"border_crossings", `{` + here + `,"limit":0}`, "limit"},
 		{"border_crossings", `{` + here + `,"limit":-3}`, "limit"},
 		{"border_crossings", `{` + here + `,"limit":101}`, "limit"},
 		{"border_crossings", `{` + here + `,"limit":1e300}`, "limit"},
@@ -59,7 +57,6 @@ func TestArgumentsOutOfRangeAreRefusedBeforeAnyRequest(t *testing.T) {
 		{"product_recalls", `{` + car + `,"year":2101}`, "year"},
 		{"product_recalls", `{` + car + `,"year":2020.5}`, "year"},
 		{"product_recalls", `{` + car + `,"year":"last"}`, "year"},
-		{"product_recalls", `{"product":"infant formula","limit":0}`, "limit"},
 		{"product_recalls", `{"product":"infant formula","limit":101}`, "limit"},
 		{"product_recalls", `{"product":"infant formula","limit":1e300}`, "limit"},
 		{"product_recalls", `{"product":"infant formula","limit":"lots"}`, "limit"},
@@ -83,6 +80,52 @@ func TestArgumentsOutOfRangeAreRefusedBeforeAnyRequest(t *testing.T) {
 				t.Errorf("the seller saw %d request(s) for a refused argument", hits.Load())
 			}
 		})
+	}
+}
+
+// Review of the 0.1.14 branch, finding R-2. G-6's bounds refused calls that
+// 0.1.13 sent and the sellers answer as asked: duration above 12 (airfeed
+// publishes 1 to 168 and searches for exactly that window), and 0 for hours,
+// duration or limit, which a model sends to mean "the default". 0.1.13 dropped
+// limit:0 and the sellers clamp hours:0 and duration:0. Each is now read as
+// not set, so the seller's default applies, and duration takes airfeed's range.
+// A duration longer than the span searched stays refused (the seller would
+// shorten the window and charge for it), and the error says how to ask.
+func TestCallsTheSellersAnswerAsAskedAreNotRefused(t *testing.T) {
+	byName := map[string]tool{}
+	for _, tl := range buildTools(endpoints{Air: "https://a", Border: "https://b", Recall: "https://r", Basis: "https://w"}) {
+		byName[tl.Name] = tl
+	}
+	lat, lon := 32.7157, -117.1611
+	for _, tc := range []struct {
+		tool       string
+		args       map[string]any
+		want, deny []string
+	}{
+		{"air_quality", map[string]any{"lat": lat, "lon": lon, "hours": 48.0, "duration": 24.0}, []string{"hours=48", "duration=24"}, nil},
+		{"air_quality", map[string]any{"lat": lat, "lon": lon, "hours": 168.0, "duration": 168.0}, []string{"hours=168", "duration=168"}, nil},
+		{"air_quality", map[string]any{"lat": lat, "lon": lon, "duration": 24.0}, []string{"duration=24"}, []string{"hours="}},
+		{"air_quality", map[string]any{"lat": lat, "lon": lon, "hours": 0.0}, nil, []string{"hours="}},
+		{"air_quality", map[string]any{"lat": lat, "lon": lon, "hours": "0", "duration": 0.0}, nil, []string{"hours=", "duration="}},
+		{"air_quality", map[string]any{"lat": lat, "lon": lon, "hours": 0.0, "duration": 2.0}, []string{"duration=2"}, []string{"hours="}},
+		{"border_crossings", map[string]any{"lat": lat, "lon": lon, "limit": 0.0}, nil, []string{"limit="}},
+		{"product_recalls", map[string]any{"product": "infant formula", "limit": 0.0}, nil, []string{"limit="}},
+	} {
+		u, err := byName[tc.tool].BuildURL(tc.args)
+		if err != nil {
+			t.Errorf("%s %v: %v", tc.tool, tc.args, err)
+			continue
+		}
+		for _, want := range tc.want {
+			if !strings.Contains(u, want) {
+				t.Errorf("%s %v: %s lacks %s", tc.tool, tc.args, u, want)
+			}
+		}
+		for _, deny := range tc.deny {
+			if strings.Contains(u, deny) {
+				t.Errorf("%s %v: %s carries %s", tc.tool, tc.args, u, deny)
+			}
+		}
 	}
 }
 
