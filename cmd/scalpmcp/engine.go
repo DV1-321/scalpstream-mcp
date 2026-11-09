@@ -30,7 +30,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -92,6 +95,9 @@ func engineStatusTool(e endpoints, token func() string, httpc *http.Client, user
 					"data":   map[string]any{"subscribe": plansURL},
 				}, 0, nil
 			}
+			if err := engineOriginSafe(e.Engine); err != nil {
+				return nil, 0, err
+			}
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, src, nil)
 			if err != nil {
 				return nil, 0, err
@@ -139,6 +145,49 @@ func engineStatusTool(e endpoints, token func() string, httpc *http.Client, user
 			return nil, resp.StatusCode, fmt.Errorf("my_engine_status: %s answered HTTP %d: %s", src, resp.StatusCode, snippetOf(body, 200))
 		},
 	}
+}
+
+// engineOriginSafe says whether the status token may be sent to origin: over
+// https, or to this machine, where a local stub is the point of the override.
+// The check is at call time, so a bad SCALPMCP_ENGINE_URL costs this one tool
+// and not the data tools beside it. Error text names the variable, never the
+// token.
+func engineOriginSafe(origin string) error {
+	u, err := url.Parse(origin)
+	if err == nil && u.Host != "" {
+		if u.Scheme == "https" {
+			return nil
+		}
+		if u.Scheme == "http" && isLoopbackHost(u.Hostname()) {
+			return nil
+		}
+	}
+	return errors.New("my_engine_status: refusing to send the status token: SCALPMCP_ENGINE_URL must be an https:// origin")
+}
+
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// warnEngineOverride says at start when an override points the status token
+// outside the operator's domain. It is the user's own environment, so this is a
+// warning rather than a refusal, but a token sent there is a token handed over.
+func warnEngineOverride(origin string) {
+	u, err := url.Parse(origin)
+	if err == nil && u.Scheme == "http" && isLoopbackHost(u.Hostname()) {
+		return
+	}
+	if err == nil && u.Scheme == "https" {
+		host := strings.ToLower(u.Hostname())
+		if host == "scalpstream.com" || strings.HasSuffix(host, ".scalpstream.com") {
+			return
+		}
+	}
+	log.Printf("WARNING: SCALPMCP_ENGINE_URL points outside https://*.scalpstream.com, so my_engine_status would send %s there", statusTokenEnv)
 }
 
 // snippetOf trims a body for an error message.

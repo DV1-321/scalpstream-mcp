@@ -152,6 +152,7 @@ func endpointsFromEnv() endpoints {
 	}
 	if v := os.Getenv("SCALPMCP_ENGINE_URL"); v != "" {
 		e.Engine = strings.TrimRight(v, "/")
+		warnEngineOverride(e.Engine)
 	}
 	return e
 }

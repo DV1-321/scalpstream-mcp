@@ -58,7 +58,10 @@ type toolset struct {
 
 func newToolset(c *client.Client, base endpoints) *toolset {
 	ts := &toolset{client: c, byName: map[string]tool{}, notOffered: map[string]string{},
-		statusToken: statusTokenFromEnv, engineHTTP: &http.Client{Timeout: engineTimeout}}
+		statusToken: statusTokenFromEnv, engineHTTP: &http.Client{Timeout: engineTimeout,
+			// The status route never redirects, and Go keeps Authorization on a
+			// same-host redirect, https to http included. The 3xx is reported.
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}}
 	ts.tools = buildTools(base)
 	ts.tools = append(ts.tools, engineStatusTool(base, func() string { return ts.statusToken() }, ts.engineHTTP, c.UserAgent))
 	for _, t := range ts.tools {
