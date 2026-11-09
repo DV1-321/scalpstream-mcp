@@ -118,6 +118,9 @@ func main() {
 			log.Printf("spending off: a key is set, but the per-call cap (%s) or the session budget (%s) is zero. Paid tools return the free preview and the price.",
 				client.MaxPriceAtomic, client.Budget)
 		}
+	} else if client.SpendingOff() {
+		log.Printf("spending off: the per-call cap (%s) or the session budget (%s) is zero, so no key would spend. Paid tools return the free preview and the price.",
+			client.MaxPriceAtomic, client.Budget)
 	} else {
 		log.Printf("preview-only: no EVM_BASE_PRIVATE_KEY set. Paid tools return the free preview and the price.")
 	}

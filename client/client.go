@@ -297,13 +297,15 @@ func (c *Client) FetchResponse(ctx context.Context, url string) (Response, error
 	}
 	quote := quoteOf(opt)
 
-	if c.Signer == nil {
-		return refused, &ErrPaymentRequired{Resource: url, Quote: quote,
-			Reason: "no spending key configured (set EVM_BASE_PRIVATE_KEY in the MCP server's environment to enable paid calls)"}
-	}
+	// The limit first: with a limit of zero a key would still not spend, so
+	// "set a key" would send the user to fund one for nothing.
 	if c.SpendingOff() {
 		return refused, &ErrPaymentRequired{Resource: url, Quote: quote,
 			Reason: "spending is turned off: the per-call cap or the session budget is set to zero"}
+	}
+	if c.Signer == nil {
+		return refused, &ErrPaymentRequired{Resource: url, Quote: quote,
+			Reason: "no spending key configured (set EVM_BASE_PRIVATE_KEY in the MCP server's environment to enable paid calls)"}
 	}
 
 	amount, ok := new(big.Int).SetString(opt.Amount, 10)

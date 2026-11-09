@@ -41,6 +41,50 @@ func TestSpendingLimitValues(t *testing.T) {
 	}
 }
 
+// A user who chose to spend nothing must not be asked to fund and install a key
+// that still would not spend.
+func TestAZeroLimitWithNoKeyDoesNotAskForAKey(t *testing.T) {
+	for name, set := range map[string]func(*toolset){
+		"budget 0": func(ts *toolset) { ts.client.Budget = big.NewInt(0) },
+		"cap 0":    func(ts *toolset) { ts.client.MaxPriceAtomic = big.NewInt(0) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			seller := newStubSeller(t, []byte(`{"crossings":[]}`), []byte(`{"sample":true}`), false)
+			ts := payingToolset(t, seller.URL)
+			ts.client.Signer = nil
+			set(ts)
+
+			_, env, err := ts.call(context.Background(), "border_crossings", json.RawMessage(`{"lat":32.7157,"lon":-117.1611}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if env["paid"] != false || env["data"] == nil {
+				t.Errorf("paid=%v data=%v, want the free preview", env["paid"], env["data"])
+			}
+			st := ts.status()["data"].(map[string]any)
+			for what, text := range map[string]string{
+				"reason":        env["reason"].(string),
+				"howto":         env["howto"].(string),
+				"instructions":  ts.instructions(),
+				"how_to_enable": st["how_to_enable"].(string),
+			} {
+				if strings.Contains(text, "EVM_BASE_PRIVATE_KEY") {
+					t.Errorf("%s asks for a key a zero limit would not spend: %s", what, text)
+				}
+			}
+			if why := env["reason"].(string); !strings.Contains(why, "turned off") {
+				t.Errorf("reason = %q, want it to say spending is turned off", why)
+			}
+			if !strings.Contains(ts.instructions(), "SPENDING OFF") {
+				t.Errorf("instructions do not say spending is off: %s", ts.instructions())
+			}
+			if how := env["howto"].(string); !strings.Contains(how, "SCALPMCP_BUDGET_USD") {
+				t.Errorf("howto = %q, want it to name the limit", how)
+			}
+		})
+	}
+}
+
 func TestAZeroLimitSpendsNothingEvenWithAKeySet(t *testing.T) {
 	for name, set := range map[string]func(*toolset){
 		"budget 0": func(ts *toolset) { ts.client.Budget = big.NewInt(0) },
