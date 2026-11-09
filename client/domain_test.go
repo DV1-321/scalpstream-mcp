@@ -29,8 +29,8 @@ const usdcOnBase = `"scheme":"exact","network":"eip155:8453","amount":"10000","a
 // nothing is held against the budget for a payment it was going to fail.
 func TestADomainThatIsNotUSDCsIsRefusedUnsigned(t *testing.T) {
 	for name, accept := range map[string]string{
-		"wrong name":          `{` + usdcOnBase + `,"extra":{"name":"Not USDC","version":"2"}}`,
-		"wrong version":       `{` + usdcOnBase + `,"extra":{"name":"USD Coin","version":"9"}}`,
+		"wrong name":           `{` + usdcOnBase + `,"extra":{"name":"Not USDC","version":"2"}}`,
+		"wrong version":        `{` + usdcOnBase + `,"extra":{"name":"USD Coin","version":"9"}}`,
 		"name is not a string": `{` + usdcOnBase + `,"extra":{"name":7,"version":"2"}}`,
 	} {
 		t.Run(name, func(t *testing.T) {
