@@ -98,6 +98,40 @@ func TestDomainSeparatorMatchesContract(t *testing.T) {
 	}
 }
 
+// The domains the client pins are the ones whose separators were read from the
+// contracts (pay.go), not a second copy that could drift from them.
+func TestUSDCDomainReproducesTheOnChainSeparators(t *testing.T) {
+	for chainID, want := range map[int64]string{
+		ChainBase:     "02fa7265e7c5d81118673727957699e4d68f74cd74b7db77da710fe8a2c7834f",
+		ChainArbitrum: "08d11903f8419e68b1b8721bcbe2e9fc68569122a77ef18c216f10b3b5112c78",
+		ChainPolygon:  "caa2ce1a5703ccbe253a34eb3166df60a705c561b44b192061e28f2a985be2ca",
+	} {
+		d, pinned := USDCDomain(chainID)
+		if !pinned {
+			t.Errorf("chain %d has no pinned domain", chainID)
+			continue
+		}
+		sep := keccak(
+			keccak([]byte(eip712DomainType)),
+			keccak([]byte(d.Name)),
+			keccak([]byte(d.Version)),
+			uintWordFromBig(big.NewInt(d.ChainID)),
+			mustAddrWord(t, d.Contract),
+		)
+		if got := hex.EncodeToString(sep); got != want {
+			t.Errorf("chain %d: separator %s, want the contract's %s", chainID, got, want)
+		}
+	}
+	// Never read from the chain in this repo, and worth nothing if wrong, so it
+	// stays unpinned rather than pinned to a guess.
+	if _, pinned := USDCDomain(ChainBaseSepolia); pinned {
+		t.Error("Base Sepolia's domain is pinned, but it was never read from the contract")
+	}
+	if _, pinned := USDCDomain(1); pinned {
+		t.Error("an unknown chain has a pinned domain")
+	}
+}
+
 func mustAddrWord(t *testing.T, a string) []byte {
 	t.Helper()
 	w, err := addrWord(a)

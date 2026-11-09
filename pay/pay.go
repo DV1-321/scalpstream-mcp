@@ -79,6 +79,20 @@ func USDCFor(chainID int64) (string, bool) {
 	return "", false
 }
 
+// USDCDomain is the EIP-712 domain of USDC on chainID, and whether it is pinned.
+// The three mainnet contracts report name "USD Coin", version "2" and reproduce
+// the separators above, so the client signs over these whatever a seller's 402
+// says. Base Sepolia is not pinned: this repo has never read that contract, and
+// a guess could only break testnet payments, so there the seller's values stand.
+func USDCDomain(chainID int64) (TokenDomain, bool) {
+	switch chainID {
+	case ChainBase, ChainArbitrum, ChainPolygon:
+		contract, _ := USDCFor(chainID)
+		return TokenDomain{Name: "USD Coin", Version: "2", ChainID: chainID, Contract: contract}, true
+	}
+	return TokenDomain{}, false
+}
+
 // Authorization is the buyer's signed EIP-3009 transferWithAuthorization. A
 // seller never constructs or signs one — it is produced by the buyer's wallet
 // and relayed to the facilitator verbatim.

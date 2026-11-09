@@ -285,7 +285,7 @@ func (c *Client) FetchResponse(ctx context.Context, url string) (Response, error
 		// Nothing this client will sign for. The seller's terms are still
 		// reported (the first EVM option, for display only) so a caller can
 		// see the price and the asset that was refused.
-		err := &ErrPaymentRequired{Resource: url, Reason: "no option this client will pay: it pays Circle USDC on Base, Arbitrum or Polygon only, and an option naming another asset or chain is refused unsigned"}
+		err := &ErrPaymentRequired{Resource: url, Reason: "no option this client will pay: it pays Circle USDC on Base, Arbitrum or Polygon only, and an option naming another asset, chain or token domain is refused unsigned"}
 		for _, a := range ch.Accepts {
 			if a.Scheme == "exact" && strings.HasPrefix(a.Network, "eip155:") {
 				err.Quote = quoteOf(a)
@@ -331,9 +331,12 @@ func (c *Client) FetchResponse(ctx context.Context, url string) (Response, error
 		}
 	}()
 
-	name, _ := opt.Extra["name"].(string)
-	version, _ := opt.Extra["version"].(string)
-	domain := pay.TokenDomain{Name: name, Version: version, ChainID: chainID, Contract: opt.Asset}
+	domain, pinned := pay.USDCDomain(chainID)
+	if !pinned { // the testnet only: findEVMOption refuses any other unknown chain
+		name, _ := opt.Extra["name"].(string)
+		version, _ := opt.Extra["version"].(string)
+		domain = pay.TokenDomain{Name: name, Version: version, ChainID: chainID, Contract: opt.Asset}
+	}
 	exact, err := c.Signer.AuthorizeTransfer(domain, opt.PayTo, opt.Amount, 5*time.Minute)
 	if err != nil {
 		return refused, fmt.Errorf("x402client: %s: authorize: %w", url, err)
@@ -635,6 +638,13 @@ func findEVMOption(ch x402.StdChallenge, prefer int64) (x402.StdAccept, int64, b
 		if !known || !strings.EqualFold(strings.TrimSpace(a.Asset), want) {
 			continue
 		}
+		// The domain is pinned too (2026-11-08 sweep, finding G-5). A seller
+		// naming another one has a broken or hostile payment path: its verifier
+		// would reject this signature after the reservation, and that burns
+		// budget as "unconfirmed" with no money moved. Refused unsigned instead.
+		if d, pinned := pay.USDCDomain(chainID); pinned && !extraAgrees(a.Extra, d) {
+			continue
+		}
 		if prefer != 0 {
 			if chainID == prefer {
 				return a, chainID, true
@@ -655,6 +665,19 @@ func findEVMOption(ch x402.StdChallenge, prefer int64) (x402.StdAccept, int64, b
 		return fallback, fallbackChain, true
 	}
 	return x402.StdAccept{}, 0, false
+}
+
+// extraAgrees reports whether an option's extra is silent about the token's
+// domain or names the same one. Silence is fine: the signature is over the
+// pinned domain either way.
+func extraAgrees(extra map[string]any, d pay.TokenDomain) bool {
+	if name, named := extra["name"]; named && name != any(d.Name) {
+		return false
+	}
+	if version, named := extra["version"]; named && version != any(d.Version) {
+		return false
+	}
+	return true
 }
 
 func quoteOf(a x402.StdAccept) Quote {
