@@ -34,6 +34,12 @@ registry as `io.github.DV1-321/scalpstream-mcp` and as the
   out past the session budget (the per-call cap always held). The signed payment
   was also carried to the redirect's target. A redirect is now the answer, and
   the money stays reserved.
+- A payment the seller may have read stays counted against the budget. The
+  client decided "nothing was sent" from the kind of error alone, and a seller
+  that read the payment, dropped the connection and stopped listening produced
+  exactly that kind (the transport retries by itself, and the retry cannot
+  connect). The client now records whether the paid request was ever given a
+  connection and gives the money back only when it was not.
 - `my_engine_status` sends the status token only over https or to this machine,
   and does not follow redirects. An override outside `*.scalpstream.com` is warned
   about at start.

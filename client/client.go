@@ -31,8 +31,10 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/DV1-321/scalpstream-mcp/pay"
@@ -362,8 +364,9 @@ func (c *Client) FetchResponse(ctx context.Context, url string) (Response, error
 	}
 	paidResp, err := c.do(ctx, url, base64.StdEncoding.EncodeToString(raw))
 	if err != nil {
-		if neverSent(err) {
-			// The request never reached a socket: no name resolved, no
+		if !paidResp.presented && neverSent(err) {
+			// The request never reached a socket: no attempt got a connection
+			// (do records that), and the error is one that happens before one: no name resolved, no
 			// connection, or the TLS handshake failed before a byte of HTTP was
 			// written. Nothing was presented to the seller, so the money is
 			// still ours and the reservation is released (via the defer).
@@ -552,6 +555,12 @@ type rawResponse struct {
 	// truncated: the reply was longer than maxBody and body holds the first
 	// maxBody bytes of it.
 	truncated bool
+	// presented: some attempt of this request was handed a connection, so its
+	// headers, the payment among them, may have been written. Set on an error
+	// return too. The transport retries a GET by itself when a reused connection
+	// dies before answering, and the retry's failed dial used to read as
+	// "nothing was sent" for a payment the seller had already read.
+	presented bool
 }
 
 func (c *Client) do(ctx context.Context, url, payment string) (rawResponse, error) {
@@ -570,8 +579,12 @@ func (c *Client) do(ctx context.Context, url, payment string) (rawResponse, erro
 	if c.UserAgent != "" {
 		req.Header.Set("User-Agent", c.UserAgent)
 	}
+	var presented atomic.Bool
 	hc := c.httpClient()
 	if payment != "" {
+		req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
+			GotConn: func(httptrace.GotConnInfo) { presented.Store(true) },
+		}))
 		// A paid request stops at the seller's first answer. Following a redirect
 		// carried the signed payment on to whatever host the seller named, and a
 		// redirect to an address nothing listens on came back as a dial error:
@@ -585,7 +598,7 @@ func (c *Client) do(ctx context.Context, url, payment string) (rawResponse, erro
 	}
 	resp, err := hc.Do(req)
 	if err != nil {
-		return rawResponse{}, fmt.Errorf("x402client: %s: %w", url, err)
+		return rawResponse{presented: presented.Load()}, fmt.Errorf("x402client: %s: %w", url, err)
 	}
 	defer resp.Body.Close()
 	// One byte past the cap, so a reply of exactly maxBody is whole and anything

@@ -8,7 +8,9 @@ package client_test
 // signed payment was also carried to whatever host the redirect named.
 
 import (
+	"bufio"
 	"context"
+	"fmt"
 	"math/big"
 	"net"
 	"net/http"
@@ -127,5 +129,91 @@ func TestOnlyThePaidRequestStopsAtARedirect(t *testing.T) {
 	}
 	if own.CheckRedirect != nil {
 		t.Fatal("the caller's http.Client was modified")
+	}
+}
+
+// The same review, second pass (M-1b). No redirect is needed: the seller answers
+// the unpaid GET on a keep-alive connection, reads the paid GET on that same
+// connection, closes it without answering and stops listening. Go's transport
+// retries a GET whose reused connection died before any answer, the retry's dial
+// is refused, and that dial error used to read as "nothing was sent".
+func TestAPaymentReadOnAReusedConnectionStaysReserved(t *testing.T) {
+	var got atomic.Int32
+	c := &client.Client{Signer: testSigner(t), MaxPriceAtomic: big.NewInt(100_000), Budget: big.NewInt(200_000)}
+	for round := 0; round < 6; round++ {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			br := bufio.NewReader(conn)
+			for {
+				req, err := http.ReadRequest(br)
+				if err != nil {
+					return
+				}
+				if req.Header.Get("PAYMENT-SIGNATURE") == "" {
+					_, _ = fmt.Fprintf(conn, "HTTP/1.1 402 Payment Required\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s", len(redirectQuote), redirectQuote)
+					continue
+				}
+				got.Add(1) // the signed payment is in the seller's hands
+				_ = l.Close()
+				return
+			}
+		}()
+		if _, err := c.FetchResponse(context.Background(), "http://"+l.Addr().String()+"/x"); err == nil {
+			t.Fatalf("round %d: a dropped paid request was reported as a success", round)
+		}
+		// Once the budget is used up no paid request follows the 402, and the
+		// seller would wait on the idle connection for ever.
+		http.DefaultTransport.(*http.Transport).CloseIdleConnections()
+		<-done
+		_ = l.Close()
+	}
+	if n := got.Load(); n != 2 {
+		t.Fatalf("the seller read %d signed payments of $0.10 against a $0.20 budget, want 2", n)
+	}
+	if _, n := c.Unconfirmed(); n != 2 {
+		t.Fatalf("unconfirmed calls = %d, want 2", n)
+	}
+}
+
+// A seller that is gone before the paid request gets any connection has seen
+// nothing, and the money goes back: an outage must not eat the budget.
+func TestAPaidRequestThatNeverGetsAConnectionIsReleased(t *testing.T) {
+	c := &client.Client{Signer: testSigner(t), MaxPriceAtomic: big.NewInt(100_000), Budget: big.NewInt(200_000)}
+	for round := 0; round < 5; round++ {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			defer conn.Close()
+			if _, err := http.ReadRequest(bufio.NewReader(conn)); err != nil {
+				return
+			}
+			_ = l.Close() // gone before the paid request can connect
+			_, _ = fmt.Fprintf(conn, "HTTP/1.1 402 Payment Required\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s", len(redirectQuote), redirectQuote)
+		}()
+		if _, err := c.FetchResponse(context.Background(), "http://"+l.Addr().String()+"/x"); err == nil {
+			t.Fatalf("round %d: a refused connection was reported as a success", round)
+		}
+		<-done
+	}
+	if held, n := c.Unconfirmed(); n != 0 {
+		t.Fatalf("an outage held %s over %d calls; nothing was presented, so nothing should be held", held, n)
 	}
 }
