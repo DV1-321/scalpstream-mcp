@@ -570,7 +570,20 @@ func (c *Client) do(ctx context.Context, url, payment string) (rawResponse, erro
 	if c.UserAgent != "" {
 		req.Header.Set("User-Agent", c.UserAgent)
 	}
-	resp, err := c.httpClient().Do(req)
+	hc := c.httpClient()
+	if payment != "" {
+		// A paid request stops at the seller's first answer. Following a redirect
+		// carried the signed payment on to whatever host the seller named, and a
+		// redirect to an address nothing listens on came back as a dial error:
+		// neverSent then released the reservation for a payment the seller
+		// already held. Ten $0.10 payments went out against a $0.20 budget that
+		// still read zero spent. A 3xx is now the answer, and a paid answer that
+		// is not 200 keeps the money reserved.
+		noFollow := *hc
+		noFollow.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		hc = &noFollow
+	}
+	resp, err := hc.Do(req)
 	if err != nil {
 		return rawResponse{}, fmt.Errorf("x402client: %s: %w", url, err)
 	}

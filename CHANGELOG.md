@@ -28,6 +28,12 @@ registry as `io.github.DV1-321/scalpstream-mcp` and as the
   option naming it could hold the budget the same way, and listing it first
   outranked a real rail. It is paid only when `Client.PreferChainID` names it,
   which the `scalpmcp` binary never does.
+- A paid request does not follow redirects. A seller could take the signed
+  payment and redirect to an address nothing listens on; the failed connection
+  read as "nothing was sent" and the budget was given back, so payments could go
+  out past the session budget (the per-call cap always held). The signed payment
+  was also carried to the redirect's target. A redirect is now the answer, and
+  the money stays reserved.
 - `my_engine_status` sends the status token only over https or to this machine,
   and does not follow redirects. An override outside `*.scalpstream.com` is warned
   about at start.
