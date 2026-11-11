@@ -80,6 +80,12 @@ type Client struct {
 	// HTTP is the transport. Nil uses a client with a generous timeout, because
 	// abandoning a PAID request loses the money: settlement happens before the
 	// handler runs, so a client that gives up mid-handler has still been charged.
+	//
+	// A Transport supplied here must honour net/http/httptrace (Go's own
+	// *http.Transport does). The budget is given back after a failed paid
+	// request only when the trace shows no connection was ever handed to it; a
+	// RoundTripper that sends the request without calling GotConn and then
+	// returns a dial error would have that payment released.
 	HTTP *http.Client
 
 	// Signer holds the Base spending key. Nil means preview-only: the client
