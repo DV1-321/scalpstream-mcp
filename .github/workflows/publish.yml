@@ -20,7 +20,10 @@ on:
 
 jobs:
   publish:
-    runs-on: [self-hosted, linux]
+    # GitHub-hosted, like ci.yml: a public repository must not have a
+    # self-hosted runner. The job needs nothing a hosted runner lacks (Go,
+    # python3, curl; ko builds without a Docker daemon).
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write # push the image to ghcr.io
