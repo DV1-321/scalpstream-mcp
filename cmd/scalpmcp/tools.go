@@ -820,7 +820,8 @@ func buildTools(e endpoints) []tool {
 				"recalling firm, hazard, remedy, and the lot numbers and UPCs needed to tell whether a specific unit " +
 				"is affected. Returns ACTIVE recalls by default: a product name can match hundreds of historical " +
 				"recalls and only a handful of open ones. If an agency cannot be reached the response says so and " +
-				"sets complete=false — an incomplete lookup is never an all-clear.",
+				"sets complete=false — an incomplete lookup is never an all-clear. A vehicle lookup is by name and is " +
+				"always complete=false, with recalls found or not: check the VIN at nhtsa.gov/recalls.",
 			Schema: obj(map[string]any{
 				"product":       strProp("Product, brand or ingredient, e.g. 'infant formula'. Matched as a phrase, so keep it short and specific."),
 				"make":          strProp("Vehicle make. Requires model and year together."),
@@ -830,7 +831,7 @@ func buildTools(e endpoints) []tool {
 				"limit":         numProp("Max recalls per list. Default 10, maximum 100."),
 			}),
 			Preview: e.Recall + "/preview",
-			Output:  envelopeSchema("Active (and optionally ended) recalls across FDA, NHTSA and CPSC with normalised severity, hazard, remedy, lot numbers, and a `complete` flag that is false when an agency could not be reached."),
+			Output:  envelopeSchema("Active (and optionally ended) recalls across FDA, NHTSA and CPSC with normalised severity, hazard, remedy, lot numbers, and a `complete` flag that is false when an agency could not be reached, and always false for a vehicle: a lookup by name can neither rule a recall out nor know it has every recall, so check the VIN at nhtsa.gov/recalls."),
 			BuildURL: func(args map[string]any) (string, error) {
 				product := argStr(args, "product")
 				mk, md := argStr(args, "make"), argStr(args, "model")
@@ -881,7 +882,8 @@ func buildTools(e endpoints) []tool {
 				"and spouse accounts together, and answers a pre-trade question: check=buy asks whether buying `symbol` " +
 				"on date `on` would disallow a loss already taken, and returns the disallowed amount, which sale it comes " +
 				"from and the first safe rebuy date; check=sell asks whether selling `quantity` shares of `symbol` from " +
-				"`account` at a loss on `on` is already washed by a purchase in the 30 days before. Leave check out for " +
+				"`account` at a loss on `on` would be washed by a purchase in the trades from 30 days before that date to 30 days " +
+				"after it. Leave check out for " +
 				"the ledger alone: every determination, every sale with realized/disallowed/allowed and short/long term, " +
 				"every open lot's adjusted basis and holding date, and the year's totals. A purchase in an IRA loses the " +
 				"loss permanently and the answer says so. The trades are sent in the request and processed in memory " +
@@ -893,8 +895,9 @@ func buildTools(e endpoints) []tool {
 				"trades": strProp("The user's trades, one per row: account,account_type,date,symbol,kind,quantity,price[,fees], " +
 					"rows separated by ';' (account_type: taxable, trad_ira, roth_ira, spouse_taxable, spouse_ira; kind: buy, " +
 					"sell, reinvest, stock_plan_acquire; dates YYYY-MM-DD). A JSON array of objects with those field names " +
-					"also works. At most 500 rows; send every account's trades in the ticker for the 61 days around the date " +
-					"asked about, and the whole year for yearly totals."),
+					"also works. At most 500 rows; send every trade of the ticker, in every account, back to a day by which " +
+					"none of it had been held in any account for 31 days or more, or everything there is; the whole year for " +
+					"yearly totals."),
 				"check":        enumProp("The pre-trade question. Omit for the ledger alone.", "buy", "sell"),
 				"symbol":       strProp("The ticker the question is about, as it appears in trades. Required with check."),
 				"on":           strProp("The date of the proposed trade, YYYY-MM-DD. Default: today."),

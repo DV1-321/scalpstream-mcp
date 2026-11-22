@@ -23,7 +23,9 @@ rule (options, short sales, "substantially identical" pairs and digital assets
 are not modelled; it matches the same ticker only). Every answer carries its
 own source line and disclaimer; relay them. The recall service says so and
 sets `complete: false` when a regulator could not be reached; an incomplete
-lookup is never an all-clear. A wash-sale answer is a rule calculation on the
+lookup is never an all-clear. A vehicle lookup is by name and is always
+`complete: false`, with recalls found or not: check the VIN at
+nhtsa.gov/recalls. A wash-sale answer is a rule calculation on the
 trades sent, never a recommendation and never tax advice; it cannot see trades
 it was not sent, so "no open window" means none among those. Send the user's
 trades only when they gave them for this purpose; the service processes them

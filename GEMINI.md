@@ -34,7 +34,9 @@ The tools:
   vehicle (make, model and year together) across FDA, NHTSA and CPSC, with the
   severity normalised onto one scale, the hazard, the remedy and the lot
   numbers or UPCs that say whether a specific unit is affected. `complete` is
-  false when an agency could not be reached; that is never an all-clear.
+  false when an agency could not be reached; that is never an all-clear. It is
+  always false for a vehicle: a lookup by name cannot rule a recall out, so
+  check the VIN at nhtsa.gov/recalls.
 - `border_crossings` - US land ports of entry ranked by all-in time (drive
   plus the current CBP wait) from a latitude and longitude, per vehicle type
   and lane eligibility. The nearest crossing is often not the fastest.

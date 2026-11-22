@@ -4,6 +4,27 @@ Releases are the Git tags on this repository. Each is published to the MCP
 registry as `io.github.DV1-321/scalpstream-mcp` and as the
 `ghcr.io/dv1-321/scalpstream-mcp` image.
 
+## Unreleased
+
+### Changed
+
+- `product_recalls` says what `complete` means for a vehicle. A vehicle is
+  looked up by name, and the answer is always `complete: false`, with recalls
+  found or not: NHTSA files one model under several names, so a lookup by name
+  can neither rule a recall out nor know it has every recall. The tool
+  description and its output description now say so and point to the VIN check
+  at nhtsa.gov/recalls. `GEMINI.md` and the `scalpstream-data` skill say the
+  same.
+- `wash_sale_check` describes the sell question and the trades to send as the
+  service now answers. `check=sell` asks whether the sale would be washed by a
+  purchase in the trades from 30 days before the date to 30 days after it, not
+  only the 30 days before. The `trades` parameter asks for every trade of the
+  ticker, in every account, back to a day by which none of it had been held in
+  any account for 31 days or more, or everything there is; the 61 days around
+  the date are not enough.
+
+No tool, parameter or behaviour of this server changed; these are descriptions.
+
 ## 0.1.14
 
 ### Security
